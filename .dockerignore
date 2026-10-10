@@ -1,0 +1,17 @@
+.git/
+.gitignore
+.workbuddy/
+node_modules/
+node_modules_stale/
+**/node_modules/
+web/dist/
+dist/
+server/data/
+*.db
+*.db-journal
+*.log
+docs/
+*.md
+启动系统.bat
+停止系统.bat
+.github/
