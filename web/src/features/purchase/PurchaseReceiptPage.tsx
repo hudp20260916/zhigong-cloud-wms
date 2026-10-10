@@ -1,0 +1,492 @@
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  DatePicker,
+  Divider,
+  Empty,
+  Input,
+  InputNumber,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  message,
+} from 'antd';
+import { PlusOutlined, ScanOutlined } from '@ant-design/icons';
+import { archiveApi, purchaseApi } from '../../api';
+import { useList } from '../../hooks/useList';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { exportCsv, today } from '../../utils/exportCsv';
+import { dayVal } from '../../utils/date';
+import OcrImportModal, { type OcrDraft } from './OcrImportModal';
+
+interface ItemRow {
+  key: string;
+  materialId?: number;
+  code?: string;
+  name?: string;
+  spec?: string;
+  unit?: string;
+  qty: number;
+  price: number;
+  pending?: number;
+  isGift: boolean;
+}
+
+export default function PurchaseReceiptPage() {
+  const { list, total, loading, params, patchParams, reload } = useList<any>((p) =>
+    purchaseApi.receipts(p),
+  );
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [materials, setMaterials] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [open, setOpen] = useState(false);
+  const [orderId, setOrderId] = useState<number | undefined>();
+  const [supplierId, setSupplierId] = useState<number | undefined>();
+  const [receiptDate, setReceiptDate] = useState(today());
+  const [remark, setRemark] = useState('');
+  const [items, setItems] = useState<ItemRow[]>([]);
+  const [pendingInfo, setPendingInfo] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [ocrOpen, setOcrOpen] = useState(false);
+  /** OCR 识别请求号：随建单一起提交，便于回写 ocr_logs 统计采纳率 */
+  const [ocrRequestId, setOcrRequestId] = useState<string | undefined>();
+
+  useEffect(() => {
+    archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
+    archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    purchaseApi
+      .orders({ pageSize: 200 })
+      .then((r) => setOrders(r.list.filter((o: any) => !o.isParent)))
+      .catch(() => undefined);
+  }, []);
+
+  /** 从采购订单列表「去入库」跳转：自动带出订单与待入库明细（需求 4.1） */
+  useEffect(() => {
+    const st: any = location.state;
+    if (st?.receiveOrderId) {
+      openForOrder(st.receiveOrderId);
+      navigate('/purchase/receipts', { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
+  async function openForOrder(id: number) {
+    try {
+      const res = await purchaseApi.pending(id);
+      setPendingInfo(res);
+      setOrderId(id);
+      setSupplierId(res.order.supplier_id ?? undefined);
+      setReceiptDate(today());
+      setRemark('');
+      setItems(
+        res.items.map((i: any, idx: number) => ({
+          key: `p-${idx}`,
+          materialId: i.materialId,
+          code: i.materialCode,
+          name: i.materialName,
+          spec: i.spec,
+          unit: i.unit,
+          qty: i.pendingQty,
+          price: i.price,
+          pending: i.pendingQty,
+          isGift: false,
+        })),
+      );
+      setOpen(true);
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
+
+  function openBlank() {
+    setPendingInfo(null);
+    setOrderId(undefined);
+    setSupplierId(undefined);
+    setReceiptDate(today());
+    setRemark('');
+    setItems([]);
+    setOcrRequestId(undefined);
+    setOpen(true);
+  }
+
+  /** OCR 识别结果回填建单表单：仍停留在表单里让人工复核，不直接落库 */
+  function applyOcr(draft: OcrDraft) {
+    setPendingInfo(null);
+    setOrderId(undefined);
+    setSupplierId(draft.supplierId ?? undefined);
+    setReceiptDate(today());
+    setRemark('');
+    setOcrRequestId(draft.requestId);
+    setItems(
+      draft.lines.map((l, idx) => ({
+        key: `ocr-${idx}`,
+        materialId: l.materialId ?? undefined,
+        code: l.materialCode,
+        name: l.materialName,
+        spec: l.spec,
+        unit: l.unit,
+        qty: l.qty,
+        price: l.price,
+        isGift: false,
+      })),
+    );
+    setOcrOpen(false);
+    setOpen(true);
+    message.success(`已填入 ${draft.lines.length} 行识别结果，请核对后提交`);
+  }
+
+  async function submit() {
+    const lines = items.filter((i) => i.materialId && i.qty > 0);
+    if (lines.length === 0) {
+      message.warning('请至少录入一条入库明细');
+      return;
+    }
+    setSaving(true);
+    try {
+      await purchaseApi.createReceipt({
+        orderId: orderId ?? null,
+        supplierId: supplierId ?? null,
+        receiptDate,
+        remark,
+        source: orderId ? 'order' : 'ocr',
+        ocrRequestId,
+        items: lines.map((i) => ({
+          materialId: i.materialId,
+          qty: i.qty,
+          price: i.price,
+          isGift: i.isGift,
+        })),
+      });
+      message.success('入库成功，库存已增加并重算移动加权成本');
+      setOpen(false);
+      reload();
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card
+      title="采购入库"
+      extra={
+        <Space>
+          <Input.Search
+            placeholder="供应商 / 物料"
+            allowClear
+            style={{ width: 220 }}
+            onSearch={(keyword) => patchParams({ keyword })}
+          />
+          <Button
+            onClick={() =>
+              exportCsv(
+                `采购入库_${today()}`,
+                [
+                  { title: '入库日期', key: 'receipt_date' },
+                  { title: '采购内容', key: 'purchaseContent' },
+                  { title: '供应商', key: 'supplier_name' },
+                  { title: '关联订单', key: 'order_no' },
+                  { title: '金额', key: 'total_amount' },
+                  { title: '状态', key: 'status' },
+                  { title: '操作人', key: 'operator_name' },
+                ],
+                list,
+              )
+            }
+          >
+            导出
+          </Button>
+          <PermGate permission="purchase.receipt.create">
+            <Button icon={<ScanOutlined />} onClick={() => setOcrOpen(true)}>
+              OCR 识别建单
+            </Button>
+          </PermGate>
+          <PermGate permission="purchase.receipt.create">
+            <DockAction icon={<PlusOutlined />} onClick={openBlank}>新增入库</DockAction>
+          </PermGate>
+        </Space>
+      }
+    >
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="入库单号在全系统前端不可见（列表、导出、打印均已移除），后台保留唯一 ID 用于追溯与回滚"
+      />
+
+      <ResponsiveTable
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={list}
+        scroll={{ x: 1300 }}
+        pagination={{
+          current: params.page,
+          pageSize: params.pageSize,
+          total,
+          onChange: (page, pageSize) => patchParams({ page, pageSize }),
+          showSizeChanger: true,
+        }}
+        columns={[
+          { title: '入库日期', dataIndex: 'receipt_date', width: 110 },
+          {
+            title: '采购内容',
+            dataIndex: 'purchaseContent',
+            width: 220,
+            ellipsis: true,
+            render: (v) => (
+              <Tooltip title={v || '-'}>
+                <span>{v || '-'}</span>
+              </Tooltip>
+            ),
+          },
+          { title: '供应商', dataIndex: 'supplier_name', width: 200, render: (v) => v || '-' },
+          { title: '关联订单', dataIndex: 'order_no', width: 150, render: (v) => v || '无关联订单' },
+          {
+            title: '金额',
+            dataIndex: 'total_amount',
+            width: 110,
+            render: (v) => <PriceText value={v} />,
+          },
+          { title: '来源', dataIndex: 'source', width: 90, render: (v) => (v === 'ocr' ? <Tag color="purple">识别入库</Tag> : <Tag>关联订单</Tag>) },
+          { title: '操作人', dataIndex: 'operator_name', width: 110 },
+          { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
+          {
+            title: '操作',
+            width: 170,
+            fixed: 'right',
+            render: (_, r: any) => (
+              <Space size={0}>
+                <PrintButton docType="purchase_receipt" id={r.id} />
+                {r.canUndo ? (
+                  <Popconfirm
+                    title="确认撤销该入库单？"
+                    description="撤销后库存将回滚至入库前"
+                    onConfirm={async () => {
+                      try {
+                        await purchaseApi.undoReceipt(r.id);
+                        message.success('已撤销，库存已回滚');
+                        reload();
+                      } catch (e: any) {
+                        message.error(e.message);
+                      }
+                    }}
+                  >
+                    <Button type="link" size="small" danger>
+                      撤销
+                    </Button>
+                  </Popconfirm>
+                ) : (
+                  '-'
+                )}
+              </Space>
+            ),
+          },
+        ]}
+      />
+
+      <Modal
+        open={open}
+        title={orderId ? '关联订单入库' : '直接入库'}
+        onCancel={() => setOpen(false)}
+        onOk={submit}
+        confirmLoading={saving}
+        width={1000}
+        destroyOnClose
+      >
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Select
+            style={{ width: 340 }}
+            placeholder="关联采购订单（可选）"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            value={orderId}
+            onChange={(v) => {
+              setOrderId(v);
+              if (v) openForOrder(v);
+              else {
+                setPendingInfo(null);
+                setItems([]);
+              }
+            }}
+            options={orders.map((o: any) => ({
+              value: o.id,
+              label: `${o.order_no} · ${o.summary ?? ''} · ${o.supplier_name ?? '待分配'}`,
+            }))}
+          />
+          <Select
+            style={{ width: 240 }}
+            placeholder="供应商"
+            allowClear
+            value={supplierId}
+            onChange={setSupplierId}
+            options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+          />
+          <DatePicker
+            value={dayVal(receiptDate)}
+            onChange={(d) => setReceiptDate(d ? d.format('YYYY-MM-DD') : today())}
+          />
+        </Space>
+
+        {pendingInfo && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={`已带出订单 ${pendingInfo.order.order_no}（${pendingInfo.order.supplier_name ?? '待分配供应商'}）的待入库明细`}
+          />
+        )}
+
+        <Space style={{ marginBottom: 8 }}>
+          <Button
+            size="small"
+            onClick={() =>
+              setItems((prev) => [
+                ...prev,
+                { key: `n-${Date.now()}`, qty: 1, price: 0, isGift: false },
+              ])
+            }
+          >
+            添加明细行
+          </Button>
+        </Space>
+
+        <ResponsiveTable
+          size="small"
+          rowKey="key"
+          dataSource={items}
+          pagination={false}
+          scroll={{ y: 300 }}
+          locale={{ emptyText: <Empty description="请添加入库明细" /> }}
+          columns={[
+            {
+              title: '物料',
+              dataIndex: 'materialId',
+              width: 280,
+              render: (v, r) => (
+                <Select
+                  style={{ width: '100%' }}
+                  value={v}
+                  showSearch
+                  optionFilterProp="label"
+                  options={materials.map((m) => ({
+                    value: m.id,
+                    label: `${m.code} ${m.name}`,
+                  }))}
+                  onChange={(nv) => {
+                    const m = materials.find((x) => x.id === nv);
+                    setItems((prev) =>
+                      prev.map((x) =>
+                        x.key === r.key
+                          ? { ...x, materialId: nv, code: m?.code, name: m?.name, spec: m?.spec, unit: m?.unit }
+                          : x,
+                      ),
+                    );
+                  }}
+                />
+              ),
+            },
+            { title: '规格', dataIndex: 'spec', width: 130 },
+            { title: '单位', dataIndex: 'unit', width: 70 },
+            {
+              title: '待入库',
+              dataIndex: 'pending',
+              width: 90,
+              className: 'mono',
+              render: (v) => v ?? '-',
+            },
+            {
+              title: '入库数量',
+              dataIndex: 'qty',
+              width: 120,
+              render: (v, r) => (
+                <InputNumber
+                  min={0}
+                  value={v}
+                  style={{ width: '100%' }}
+                  onChange={(nv) =>
+                    setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, qty: Number(nv ?? 0) } : x)))
+                  }
+                />
+              ),
+            },
+            {
+              title: '单价',
+              dataIndex: 'price',
+              width: 110,
+              render: (v, r) => (
+                <InputNumber
+                  min={0}
+                  step={0.01}
+                  value={v}
+                  style={{ width: '100%' }}
+                  onChange={(nv) =>
+                    setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, price: Number(nv ?? 0) } : x)))
+                  }
+                />
+              ),
+            },
+            {
+              title: '赠品',
+              dataIndex: 'isGift',
+              width: 70,
+              render: (v, r) => (
+                <Checkbox
+                  checked={v}
+                  onChange={(e) =>
+                    setItems((prev) =>
+                      prev.map((x) => (x.key === r.key ? { ...x, isGift: e.target.checked } : x)),
+                    )
+                  }
+                />
+              ),
+            },
+            {
+              title: '操作',
+              width: 70,
+              render: (_, r) => (
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  onClick={() => setItems((prev) => prev.filter((x) => x.key !== r.key))}
+                >
+                  移除
+                </Button>
+              ),
+            },
+          ]}
+        />
+
+        <Divider style={{ margin: '12px 0' }} />
+        <Input.TextArea
+          rows={2}
+          placeholder="备注"
+          value={remark}
+          onChange={(e) => setRemark(e.target.value)}
+        />
+        <div style={{ marginTop: 8, color: '#8c8c8c', fontSize: 12 }}>
+          超过订单数量的入库会被标记为「超量待结算」，不阻断入库；赠品行按 0 成本计入库存。
+        </div>
+      </Modal>
+
+      <OcrImportModal open={ocrOpen} onCancel={() => setOcrOpen(false)} onApply={applyOcr} />
+    </Card>
+  );
+}

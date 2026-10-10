@@ -1,0 +1,104 @@
+/**
+ * 打印预览器样式。
+ * 关键点：外层 .pp-stage 负责滚动与留白，内层 .pp-scaled 用 transform 缩放，
+ * 缩放不影响 iframe 内部版式 —— 预览看到的就是打印出来的样子。
+ */
+
+.pp {
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* flex/grid 子元素默认 min-width:auto，会把预览撑出横向滚动 */
+}
+
+.pp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid #f0f0f0;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: #fafafa;
+}
+
+.pp-zoom {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-meta {
+  font-size: 12px;
+  color: #888;
+}
+
+.pp-stage {
+  position: relative;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 0 0 8px 8px;
+  background: #f5f5f5;
+  /* 预览区高度跟随内容，最多占到视口 78%，避免整页被顶得过长 */
+  max-height: 78vh;
+}
+
+.pp-pagebox {
+  margin: 0 auto;
+  position: relative;
+}
+
+.pp-scaled {
+  position: relative;
+  transform-origin: top left;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+}
+
+.pp-break {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed #d4380d;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.pp-break span {
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  font-size: 11px;
+  color: #d4380d;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.pp-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 240px;
+  color: #999;
+}
+
+.pp-tip {
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #999;
+}
+
+/* 小屏：工具栏两行排布，按钮触控区域达标 */
+@media (max-width: 768px) {
+  .pp-bar {
+    row-gap: 8px;
+  }
+  .pp-stage {
+    max-height: 62vh;
+  }
+}

@@ -1,0 +1,75 @@
+import type { ReactNode } from 'react';
+import { Button, Result, Space, Tag } from 'antd';
+import { useAuthStore } from '../stores/auth';
+import { PrintButton } from './PrintButton';
+import { ResponsiveTable } from './ResponsiveTable';
+import { DockAction } from './DockAction';
+
+export { PrintButton, ResponsiveTable, DockAction };
+
+/** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
+export function PermGate({
+  permission,
+  children,
+  fallback = null,
+}: {
+  permission: string;
+  children: ReactNode;
+  fallback?: ReactNode;
+}) {
+  const has = useAuthStore((s) => s.has);
+  return <>{has(permission) ? children : fallback}</>;
+}
+
+/** 页面级权限：无权限时展示统一提示 */
+export function PermPage({ permission, children }: { permission: string; children: ReactNode }) {
+  const has = useAuthStore((s) => s.has);
+  if (!has(permission)) {
+    return (
+      <Result
+        status="403"
+        title="无访问权限"
+        subTitle="当前角色没有该页面的访问权限，请联系管理员调整权限"
+      />
+    );
+  }
+  return <>{children}</>;
+}
+
+/** 价格脱敏展示：无价格权限显示 *** */
+export function PriceText({ value, suffix = '' }: { value: any; suffix?: string }) {
+  const has = useAuthStore((s) => s.has);
+  if (!has('price.view')) return <span>***</span>;
+  const n = Number(value ?? 0);
+  return <span>{n.toFixed(2)}{suffix}</span>;
+}
+
+export function StatusTag({ status }: { status: string }) {
+  const colorMap: Record<string, string> = {
+    进行中: 'processing',
+    已完成: 'success',
+    已撤销: 'default',
+    已关闭: 'default',
+    有效: 'success',
+    已到齐: 'success',
+    部分到货: 'warning',
+    未到货: 'default',
+  };
+  return <Tag color={colorMap[status] ?? 'default'}>{status}</Tag>;
+}
+
+export function ActionBar({ children }: { children: ReactNode }) {
+  return (
+    <Space wrap style={{ marginBottom: 12 }}>
+      {children}
+    </Space>
+  );
+}
+
+export function DangerButton({ children, ...rest }: any) {
+  return (
+    <Button danger size="small" type="link" {...rest}>
+      {children}
+    </Button>
+  );
+}

@@ -1,0 +1,40 @@
+import type { Request } from 'express';
+import { db } from '../db/index.js';
+
+export interface PageParams {
+  page: number;
+  pageSize: number;
+  offset: number;
+  keyword: string;
+}
+
+export function parsePage(req: Request): PageParams {
+  const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize ?? 20) || 20));
+  return {
+    page,
+    pageSize,
+    offset: (page - 1) * pageSize,
+    keyword: String(req.query.keyword ?? '').trim(),
+  };
+}
+
+/**
+ * 名称排序片段：空值恒排末尾（需求 4.8），其余按名称升/降序。
+ * 直接拼进 SQL，调用方需保证 dir 只取 ASC / DESC。
+ */
+export function nameOrderSql(column: string, dir: string): string {
+  const d = dir.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+  return `CASE WHEN ${column} IS NULL OR ${column} = '' THEN 1 ELSE 0 END ASC, ${column} COLLATE NOCASE ${d}`;
+}
+
+export function normalizeDir(v: unknown): 'ASC' | 'DESC' {
+  return String(v ?? '').toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+}
+
+export function countRows(table: string, where = '1=1', params: any[] = []): number {
+  const row = db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${where}`).get(...params) as {
+    c: number;
+  };
+  return row.c;
+}

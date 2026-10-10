@@ -1,0 +1,392 @@
+/**
+ * 移动端适配（增量叠加，不影响桌面端）。
+ *
+ * 断点选择：
+ *   768px —— 手机/平板分界：侧栏改抽屉、列表改卡片、触控尺寸放大
+ *   414px —— 主流大屏手机（iPhone Plus / 大部分安卓）：进一步压缩间距
+ *   375px —— 小屏手机（iPhone SE / mini）：最小可读字号与最紧凑间距
+ *
+ * 原则：所有规则只在 max-width 下生效，桌面端视觉与交互保持原样。
+ */
+
+:root {
+  --touch-min: 44px; /* 最小触控区（iOS HIG / Material 建议 44~48） */
+  --dock-size: 56px; /* 悬浮主操作按钮 */
+}
+
+/* ============================================================
+   一、≤768px：手机与窄屏平板
+   ============================================================ */
+@media (max-width: 768px) {
+  /* --- 布局：不再出现横向滚动条 --- */
+  html,
+  body {
+    overflow-x: hidden;
+  }
+  .ant-layout,
+  .ant-layout-content {
+    overflow-x: hidden;
+  }
+
+  /* --- 触控区：按钮 --- */
+  .ant-btn {
+    min-height: var(--touch-min);
+    padding-inline: 14px;
+  }
+  /* 卡片操作区里的按钮纵向排列更容易点准 */
+  .ant-card-extra {
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .ant-card-extra .ant-input-search,
+  .ant-card-extra .ant-input-affix-wrapper {
+    width: 100% !important;
+  }
+  /* antd 卡片头实际是 .ant-card-head-wrapper（flex 行），要在它上面换行 */
+  .ant-card-head-wrapper {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  /* 标题独占一行不再被截断成「库存…」，工具区换行到下一行
+     （antd v5 用 CSS-in-JS 生成双类名选择器，特异性更高，这里必须 !important） */
+  .ant-card-head-title {
+    flex: 1 1 100% !important;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  .ant-card-extra {
+    flex: 1 1 100% !important;
+    margin-inline-start: 0 !important;
+    justify-content: flex-start;
+  }
+
+  /* --- 触控区：表单控件 --- */
+  /* 字号 ≥16px 是 iOS Safari 聚焦输入框时不自动放大页面的关键 */
+  .ant-input,
+  .ant-input-number-input,
+  .ant-select-selector,
+  .ant-picker,
+  .ant-input-affix-wrapper,
+  textarea.ant-input {
+    min-height: var(--touch-min) !important;
+    font-size: 16px !important;
+  }
+  .ant-input-number {
+    width: 100%;
+  }
+  .ant-select-selector .ant-select-selection-item,
+  .ant-select-selector .ant-select-selection-placeholder {
+    line-height: 42px !important;
+  }
+  /* 复选框 / 单选：把可点区域扩到 44px */
+  .ant-checkbox-wrapper,
+  .ant-radio-wrapper {
+    min-height: var(--touch-min);
+    display: inline-flex;
+    align-items: center;
+    padding-inline-end: 10px;
+  }
+  .ant-checkbox-inner,
+  .ant-radio-inner {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* --- 触控区：分页 / 菜单 / 标签 --- */
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next,
+  .ant-pagination-options .ant-select-selector {
+    min-width: var(--touch-min) !important;
+    min-height: var(--touch-min) !important;
+    line-height: 42px !important;
+  }
+  .ant-menu-item,
+  .ant-menu-submenu-title {
+    height: 48px !important;
+    line-height: 48px !important;
+  }
+  .ant-tabs-tab {
+    min-height: var(--touch-min);
+  }
+
+  /* --- 弹窗：全屏可用 + 底部操作条 --- */
+  .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+    top: 8px !important;
+  }
+  .ant-modal-content {
+    max-height: calc(100vh - 16px);
+    display: flex;
+    flex-direction: column;
+  }
+  .ant-modal-body {
+    overflow: auto;
+    overflow-x: hidden; /* 卡片化之后内容不应再横向溢出 */
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    flex: 1;
+  }
+  /* 底部操作条吸附：拇指自然落在屏幕下方 */
+  .ant-modal-footer {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    gap: 12px; /* 加大间距，防止误触相邻按钮 */
+    justify-content: flex-end;
+    border-top: 1px solid #f0f0f0;
+  }
+  .ant-modal-footer .ant-btn {
+    flex: 1;
+    max-width: 160px;
+  }
+  /* 危险操作（删除/清空）与取消拉开距离 */
+  .ant-modal-footer .ant-btn-dangerous,
+  .ant-modal-footer .ant-btn-danger {
+    margin-inline-end: auto;
+  }
+
+  /* --- 抽屉与下拉：贴底、可滚 --- */
+  .ant-drawer-body {
+    padding: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ant-select-dropdown,
+  .ant-picker-dropdown {
+    max-width: calc(100vw - 16px);
+  }
+
+  /* --- 内容区：给悬浮操作按钮留出空间，避免遮挡最后一行 --- */
+  .ant-layout-content {
+    padding: 12px 10px calc(var(--dock-size) + 24px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .ant-card {
+    margin-bottom: 12px;
+  }
+
+  /* --- 文本与图片 --- */
+  body {
+    font-size: 15px;
+  }
+  .ant-statistic-content {
+    font-size: 22px !important;
+  }
+  .ant-statistic-title {
+    font-size: 13px;
+  }
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+  .ant-table-typography,
+  .ant-typography {
+    word-break: break-word;
+  }
+
+  /* --- 表格兜底：任何遗漏未切卡片列表的表格也不允许撑破视口 --- */
+  .ant-table-wrapper,
+  .ant-table-content,
+  .ant-table-body {
+    max-width: 100%;
+  }
+
+  /* --- 上传拖拽区 --- */
+  .ant-upload-drag {
+    padding: 16px 8px;
+  }
+}
+
+/* 小屏顶栏：汉堡按钮保证 44×44 触控区 */
+.menu-trigger.ant-btn {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 0;
+  margin-inline-start: -8px;
+}
+
+/* ============================================================
+   二、悬浮主操作按钮（拇指热区：右下角）
+   ============================================================ */
+.dock-action {
+  /* 桌面端就是普通按钮，视觉不变 */
+}
+@media (max-width: 768px) {
+  .dock-action.ant-btn {
+    position: fixed;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 60;
+    height: var(--dock-size);
+    min-width: var(--dock-size);
+    padding: 0 22px;
+    border-radius: calc(var(--dock-size) / 2);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* 键盘弹起时收起悬浮按钮，避免被顶到输入框上方遮挡内容 */
+  body.kb-open .dock-action.ant-btn {
+    display: none;
+  }
+}
+
+/* ============================================================
+   三、移动端卡片列表（表格的窄屏降级形态）
+   ============================================================ */
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.mobile-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.mobile-card__sub {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.mobile-card__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  font-size: 13px;
+}
+
+.mobile-card__label {
+  color: #8c8c8c;
+  white-space: nowrap;
+}
+
+.mobile-card__value {
+  text-align: right;
+  word-break: break-word;
+}
+
+.mobile-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #f0f0f0;
+}
+
+/* 卡片内的操作按钮单独保证 44px 触控区 */
+.mobile-card__actions .ant-btn {
+  min-height: var(--touch-min);
+  padding-inline: 12px;
+}
+
+@media (max-width: 414px) {
+  .mobile-card {
+    padding: 10px 12px;
+  }
+  .mobile-card__fields {
+    font-size: 12px;
+    gap: 3px 8px;
+  }
+}
+
+/* ============================================================
+   四、≤414px：主流大屏手机
+   ============================================================ */
+@media (max-width: 414px) {
+  .ant-layout-content {
+    padding: 10px 8px calc(var(--dock-size) + 20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .ant-card-head-title {
+    font-size: 15px;
+  }
+  .ant-card-body {
+    padding: 12px;
+  }
+  .ant-statistic-content {
+    font-size: 20px !important;
+  }
+  /* 指标卡两列并排仍可读 */
+  .ant-row > [class*='ant-col'] {
+    min-width: 0;
+  }
+  .ant-descriptions-item-label,
+  .ant-descriptions-item-content {
+    font-size: 13px;
+  }
+  .ant-modal-footer .ant-btn {
+    font-size: 15px;
+  }
+  :root {
+    --dock-size: 52px;
+  }
+}
+
+/* ============================================================
+   五、≤375px：小屏手机（iPhone SE / mini）
+   ============================================================ */
+@media (max-width: 375px) {
+  body {
+    font-size: 14px;
+  }
+  .ant-layout-content {
+    padding: 8px 6px calc(var(--dock-size) + 16px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .ant-card-body {
+    padding: 10px;
+  }
+  .ant-card-head {
+    padding: 0 10px;
+  }
+  .mobile-card {
+    padding: 9px 10px;
+  }
+  .mobile-card__title {
+    font-size: 14px;
+  }
+  .mobile-card__fields {
+    grid-template-columns: 1fr; /* 单列：标签与值上下排，避免挤压换行 */
+    gap: 2px;
+  }
+  .mobile-card__value {
+    text-align: left;
+  }
+  .ant-statistic-content {
+    font-size: 18px !important;
+  }
+  /* 顶部栏在小屏只保留必要信息 */
+  .app-header .ant-typography {
+    display: none;
+  }
+  .ant-btn {
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+  .dock-action.ant-btn {
+    padding: 0 16px;
+    font-size: 15px;
+  }
+}

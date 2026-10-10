@@ -1,0 +1,294 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { DOC_STATUS, PO_STATUS, summarize } from '../../../../shared/enums.js';
+import { db, nowIso, tx } from '../../db/index.js';
+import { Err } from '../../core/errors.js';
+import { nextCode } from '../../core/code.js';
+import { applyStock, reverseStock } from '../../core/ledger.js';
+import { writeLog } from '../../core/log.js';
+import { maskList } from '../../core/serializer.js';
+import { requirePerm } from '../../middleware/auth.js';
+import { canViewPrice } from '../../middleware/context.js';
+import { countRows, parsePage } from '../../shared/query.js';
+import { ok, okList } from '../../shared/http.js';
+import { refreshOrderStatus, syncParentStatus } from './helpers.js';
+import { linkOcrReceipt } from './ocr.js';
+
+export const purchaseReceiptRouter = Router();
+
+const itemSchema = z.object({
+  materialId: z.number().int().positive(),
+  qty: z.number().positive('入库数量必须大于 0'),
+  price: z.number().min(0).default(0),
+  isGift: z.boolean().default(false),
+  remark: z.string().trim().optional().default(''),
+});
+
+const createSchema = z.object({
+  orderId: z.number().int().nullable().optional(),
+  supplierId: z.number().int().nullable().optional(),
+  receiptDate: z.string().min(1, '请选择入库日期'),
+  items: z.array(itemSchema).min(1, '请至少录入一条入库明细'),
+  source: z.enum(['order', 'ocr']).default('order'),
+  /** OCR 建单时带上识别请求号，用于把 ocr_logs 与最终入库单关联起来 */
+  ocrRequestId: z.string().trim().optional(),
+  remark: z.string().trim().optional().default(''),
+});
+
+/** 采购内容：有父单优先展示主产品名称，无父单展示物料名称（需求 3.4.4） */
+function purchaseContent(orderId: number | null | undefined, materialIds: number[]): string {
+  if (orderId) {
+    const order = db
+      .prepare(
+        `SELECT p.name AS product_name FROM purchase_orders o
+           LEFT JOIN products p ON p.id = o.product_id WHERE o.id = ?`,
+      )
+      .get(orderId) as { product_name: string | null } | undefined;
+    if (order?.product_name) return order.product_name;
+  }
+  if (materialIds.length === 0) return '';
+  const ph = materialIds.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT name FROM materials WHERE id IN (${ph})`).all(...materialIds) as {
+    name: string;
+  }[];
+  return summarize(rows.map((r) => r.name));
+}
+
+purchaseReceiptRouter.get('/', requirePerm('purchase.receipt.view'), (req, res) => {
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  const cond: string[] = ['1=1'];
+  const params: any[] = [];
+  if (keyword) {
+    cond.push(
+      `(IFNULL(s.name,'') LIKE ? OR EXISTS (SELECT 1 FROM purchase_receipt_items ri JOIN materials m ON m.id = ri.material_id WHERE ri.receipt_id = r.id AND (m.name LIKE ? OR m.code LIKE ?)))`,
+    );
+    params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.order_id, r.supplier_id, r.receipt_date, r.status, r.source,
+              r.total_amount, r.remark, r.created_at,
+              s.name AS supplier_name, o.order_no, o.parent_order_no, o.product_id,
+              p.name AS product_name, u.display_name AS operator_name,
+              (SELECT IFNULL(GROUP_CONCAT(m.name, '、'), '')
+                 FROM purchase_receipt_items ri JOIN materials m ON m.id = ri.material_id
+                WHERE ri.receipt_id = r.id) AS material_names
+         FROM purchase_receipts r
+         LEFT JOIN suppliers s ON s.id = r.supplier_id
+         LEFT JOIN purchase_orders o ON o.id = r.order_id
+         LEFT JOIN products p ON p.id = o.product_id
+         LEFT JOIN users u ON u.id = r.operator_id
+        WHERE ${cond.join(' AND ')}
+        ORDER BY r.id DESC
+        LIMIT ? OFFSET ?`,
+    )
+    .all(...params, pageSize, offset) as any[];
+
+  const total = countRows(
+    `purchase_receipts r
+      LEFT JOIN suppliers s ON s.id = r.supplier_id
+      LEFT JOIN purchase_orders o ON o.id = r.order_id`,
+    cond.join(' AND '),
+    params,
+  );
+
+  const ctx = req.ctx!;
+  const canUndo = ctx.permissions.includes('purchase.receipt.undo');
+  const list = maskList(rows, { canViewPrice: canViewPrice(ctx) }).map((r: any) => ({
+    ...r,
+    // 采购内容优先取主产品名称，其次物料合并摘要
+    purchaseContent: r.product_name || summarize(String(r.material_names ?? '').split('、').filter(Boolean)),
+    canUndo: canUndo && r.status === DOC_STATUS.VALID,
+  }));
+
+  okList(res, list, total);
+});
+
+purchaseReceiptRouter.post('/', requirePerm('purchase.receipt.create'), (req, res) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) throw Err.badRequest(parsed.error.issues[0].message);
+  const d = parsed.data;
+  const ctx = req.ctx!;
+
+  const id = tx(() => {
+    let supplierId = d.supplierId ?? null;
+    let parentNo: string | null = null;
+
+    if (d.orderId) {
+      const order = db.prepare(`SELECT * FROM purchase_orders WHERE id = ?`).get(d.orderId) as any;
+      if (!order) throw Err.notFound('关联的采购订单不存在');
+      if (order.status !== PO_STATUS.ONGOING) {
+        throw Err.conflict('该采购订单当前状态不可入库');
+      }
+      supplierId = supplierId ?? order.supplier_id ?? null;
+      parentNo = order.parent_order_no ?? null;
+    }
+
+    const materialIds = d.items.map((i) => i.materialId);
+
+    // 超量校验：关联订单时统计超量并标记，不阻断（需求 3.4.4 超量待结算标记）
+    const overs = new Set<number>();
+    if (d.orderId) {
+      for (const it of d.items) {
+        const oi = db
+          .prepare(`SELECT qty, received_qty FROM purchase_order_items WHERE order_id = ? AND material_id = ?`)
+          .get(d.orderId, it.materialId) as { qty: number; received_qty: number } | undefined;
+        if (!oi) {
+          throw Err.conflict('入库物料不在该采购订单明细中，请核对');
+        }
+        if (Number(oi.received_qty) + it.qty > Number(oi.qty)) overs.add(it.materialId);
+      }
+    }
+
+    const receiptNo = nextCode('purchaseReceipt', d.receiptDate);
+    const totalAmount = d.items.reduce((s, i) => s + i.qty * i.price, 0);
+
+    const info = db
+      .prepare(
+        `INSERT INTO purchase_receipts
+           (receipt_no, order_id, supplier_id, receipt_date, operator_id, status, source, total_amount, remark, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        receiptNo,
+        d.orderId ?? null,
+        supplierId,
+        d.receiptDate,
+        ctx.userId,
+        DOC_STATUS.VALID,
+        d.source,
+        totalAmount,
+        d.remark,
+        nowIso(),
+      );
+
+    const receiptId = Number(info.lastInsertRowid);
+
+    const insItem = db.prepare(
+      `INSERT INTO purchase_receipt_items (receipt_id, material_id, qty, price, amount, is_gift, over_qty, remark)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    );
+    for (const it of d.items) {
+      insItem.run(
+        receiptId,
+        it.materialId,
+        it.qty,
+        it.price,
+        it.qty * it.price,
+        it.isGift ? 1 : 0,
+        overs.has(it.materialId) ? 1 : 0,
+        it.remark,
+      );
+    }
+
+    // 库存与移动加权成本：唯一入口 applyStock
+    applyStock(
+      d.items.map((it) => ({
+        itemType: 'material' as const,
+        itemId: it.materialId,
+        direction: 'in' as const,
+        qty: it.qty,
+        bizType: '采购入库',
+        bizId: receiptId,
+        bizNo: undefined, // 入库单号前端不可见
+        unitPrice: it.price,
+        operatorId: ctx.userId,
+      })),
+    );
+
+    if (d.orderId) {
+      const upd = db.prepare(
+        `UPDATE purchase_order_items SET received_qty = received_qty + ?
+          WHERE order_id = ? AND material_id = ?`,
+      );
+      for (const it of d.items) upd.run(it.qty, d.orderId, it.materialId);
+      refreshOrderStatus(d.orderId);
+      if (parentNo) syncParentStatus(parentNo);
+    }
+
+    writeLog({
+      operatorId: ctx.userId,
+      action: '采购入库',
+      targetType: 'purchase_receipt',
+      targetId: receiptId,
+      detail: {
+        orderId: d.orderId ?? null,
+        count: d.items.length,
+        totalAmount,
+        source: d.source,
+        ocrRequestId: d.ocrRequestId ?? null,
+      },
+    });
+
+    return receiptId;
+  });
+
+  // OCR 草稿被采纳后回写日志，便于统计识别采纳率
+  if (d.source === 'ocr') linkOcrReceipt(d.ocrRequestId, id);
+
+  ok(res, { id });
+});
+
+purchaseReceiptRouter.get('/:id', requirePerm('purchase.receipt.view'), (req, res) => {
+  const id = Number(req.params.id);
+  const receipt = db.prepare(`SELECT * FROM purchase_receipts WHERE id = ?`).get(id) as any;
+  if (!receipt) throw Err.notFound('入库单不存在');
+  const items = db
+    .prepare(
+      `SELECT ri.*, m.code, m.name, m.spec, m.unit
+         FROM purchase_receipt_items ri JOIN materials m ON m.id = ri.material_id
+        WHERE ri.receipt_id = ?`,
+    )
+    .all(id) as any[];
+  const ctx = { canViewPrice: canViewPrice(req.ctx!) };
+  ok(res, {
+    receipt: maskList([receipt], ctx)[0],
+    items: maskList(items, ctx),
+  });
+});
+
+/** 撤销入库：反向流水回滚库存，回退订单已入库量（需求 3.4.4） */
+purchaseReceiptRouter.post('/:id/undo', requirePerm('purchase.receipt.undo'), (req, res) => {
+  const id = Number(req.params.id);
+  const ctx = req.ctx!;
+
+  tx(() => {
+    const receipt = db.prepare(`SELECT * FROM purchase_receipts WHERE id = ?`).get(id) as any;
+    if (!receipt) throw Err.notFound('入库单不存在');
+    if (receipt.status !== DOC_STATUS.VALID) throw Err.conflict('该入库单已撤销');
+
+    const items = db
+      .prepare(`SELECT * FROM purchase_receipt_items WHERE receipt_id = ?`)
+      .all(id) as any[];
+
+    reverseStock('采购入库', id, ctx.userId);
+
+    if (receipt.order_id) {
+      const upd = db.prepare(
+        `UPDATE purchase_order_items SET received_qty = MAX(received_qty - ?, 0)
+          WHERE order_id = ? AND material_id = ?`,
+      );
+      for (const it of items) upd.run(it.qty, receipt.order_id, it.material_id);
+      const order = db.prepare(`SELECT parent_order_no FROM purchase_orders WHERE id = ?`).get(
+        receipt.order_id,
+      ) as any;
+      refreshOrderStatus(receipt.order_id);
+      if (order?.parent_order_no) syncParentStatus(order.parent_order_no);
+    }
+
+    db.prepare(`UPDATE purchase_receipts SET status = ? WHERE id = ?`).run(DOC_STATUS.CANCELLED, id);
+
+    writeLog({
+      operatorId: ctx.userId,
+      action: '撤销采购入库',
+      targetType: 'purchase_receipt',
+      targetId: id,
+      detail: { count: items.length },
+    });
+  });
+
+  ok(res, { id });
+});
+
+export { purchaseContent };

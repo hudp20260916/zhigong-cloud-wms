@@ -1,0 +1,16 @@
+node_modules/
+node_modules_stale/
+dist/
+server/data/*.db
+server/data/*.db-journal
+server/data/*.db-*
+*.log
+.DS_Store
+.vite/
+# 本地环境变量（含密钥），仓库里只放 .env.example
+.env
+.env.local
+.env.*.local
+# WorkBuddy 本地会话数据（记忆/剪贴板截图），不上仓库
+.workbuddy/
+*.stale

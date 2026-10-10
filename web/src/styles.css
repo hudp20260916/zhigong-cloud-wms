@@ -1,0 +1,42 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.app-logo {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1677ff;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  padding: 0 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.page-title {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+
+.low-stock-row {
+  background: #fff7f0;
+}

@@ -1,0 +1,29 @@
+{
+  "name": "zhigong-cloud-wms",
+  "version": "1.4.6",
+  "private": true,
+  "description": "智工云仓 - 小家电生产组装进销存管理系统",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm -w server run dev",
+    "dev:web": "npm -w web run dev",
+    "build": "npm -w web run build",
+    "typecheck": "npm -w server run typecheck && npm -w web run typecheck",
+    "db:reset": "npm -w server run db:reset"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "optionalDependencies": {
+    "@esbuild/win32-x64": "^0.28.2",
+    "@rollup/rollup-win32-x64-msvc": "^4.64.3"
+  },
+  "dependencies": {
+    "@emotion/hash": "^0.8.0",
+    "@emotion/unitless": "^0.7.5"
+  }
+}

@@ -1,0 +1,191 @@
+import { api, getToken, API_BASE, type ListResult } from './client';
+
+export interface UserInfo {
+  id: number;
+  username: string;
+  displayName: string;
+  role: string;
+  permissions: string[];
+}
+
+export const authApi = {
+  login: (username: string, password: string) =>
+    api.post<{ token: string; user: UserInfo; permissions: string[] }>('/auth/login', {
+      username,
+      password,
+    }),
+  me: () => api.get<{ id: number; username: string; displayName: string; role: string; permissions: string[] }>('/auth/me'),
+};
+
+export const dashboardApi = {
+  summary: () => api.get<any>('/dashboard/summary'),
+};
+
+export const archiveApi = {
+  materials: (p?: any) => api.get<ListResult<any>>('/archive/materials', p),
+  materialOptions: () => api.get<any[]>('/archive/materials/options'),
+  createMaterial: (b: any) => api.post<{ id: number }>('/archive/materials', b),
+  updateMaterial: (id: number, b: any) => api.put<{ id: number }>(`/archive/materials/${id}`, b),
+  deleteMaterial: (id: number) => api.del<{ id: number }>(`/archive/materials/${id}`),
+
+  products: (p?: any) => api.get<ListResult<any>>('/archive/products', p),
+  productOptions: () => api.get<any[]>('/archive/products/options'),
+  productDetail: (id: number) => api.get<any>(`/archive/products/${id}`),
+  createProduct: (b: any) => api.post<{ id: number }>('/archive/products', b),
+  updateProduct: (id: number, b: any) => api.put<{ id: number }>(`/archive/products/${id}`, b),
+  deleteProduct: (id: number) => api.del<{ id: number }>(`/archive/products/${id}`),
+
+  suppliers: (p?: any) => api.get<ListResult<any>>('/archive/suppliers', p),
+  supplierOptions: () => api.get<any[]>('/archive/suppliers/options'),
+  createSupplier: (b: any) => api.post<{ id: number }>('/archive/suppliers', b),
+  updateSupplier: (id: number, b: any) => api.put<{ id: number }>(`/archive/suppliers/${id}`, b),
+  deleteSupplier: (id: number) => api.del<{ id: number }>(`/archive/suppliers/${id}`),
+
+  customers: (p?: any) => api.get<ListResult<any>>('/archive/customers', p),
+  createCustomer: (b: any) => api.post<{ id: number }>('/archive/customers', b),
+  updateCustomer: (id: number, b: any) => api.put<{ id: number }>(`/archive/customers/${id}`, b),
+  deleteCustomer: (id: number) => api.del<{ id: number }>(`/archive/customers/${id}`),
+};
+
+export const inventoryApi = {
+  materials: (p?: any) => api.get<ListResult<any>>('/inventory/materials', p),
+  products: (p?: any) => api.get<ListResult<any>>('/inventory/products', p),
+  detail: (p: any) => api.get<any>('/inventory/detail', p),
+  initial: (items: any[]) => api.post<any>('/inventory/initial', { items }),
+  ledger: (p?: any) => api.get<ListResult<any>>('/inventory/ledger', p),
+};
+
+export const purchaseApi = {
+  orders: (p?: any) => api.get<ListResult<any>>('/purchase/orders', p),
+  orderDetail: (id: number) => api.get<any>(`/purchase/orders/${id}`),
+  pending: (id: number) => api.get<any>(`/purchase/orders/${id}/pending`),
+  createOrder: (b: any) => api.post<any>('/purchase/orders', b),
+  updateOrder: (id: number, b: any) => api.put<{ id: number }>(`/purchase/orders/${id}`, b),
+  deleteOrder: (id: number) => api.del<{ id: number }>(`/purchase/orders/${id}`),
+
+  receipts: (p?: any) => api.get<ListResult<any>>('/purchase/receipts', p),
+  receiptDetail: (id: number) => api.get<any>(`/purchase/receipts/${id}`),
+  createReceipt: (b: any) => api.post<{ id: number }>('/purchase/receipts', b),
+  undoReceipt: (id: number) => api.post<{ id: number }>(`/purchase/receipts/${id}/undo`),
+
+  returns: (p?: any) => api.get<ListResult<any>>('/purchase/returns', p),
+  createReturn: (b: any) => api.post<{ id: number }>('/purchase/returns', b),
+  undoReturn: (id: number) => api.post<{ id: number }>(`/purchase/returns/${id}/undo`),
+
+  arrivals: (p?: any) => api.get<ListResult<any>>('/purchase/arrivals', p),
+
+  // OCR 建单（P6）：识别结果只是草稿，确认后仍走 receipts 建单
+  ocrRecognize: (b: { fileName: string; mimeType: string; contentBase64: string }) =>
+    api.post<{ requestId: string; result: any; durationMs: number }>('/purchase/ocr/recognize', b),
+  ocrLogs: () => api.get<any[]>('/purchase/ocr/logs'),
+  ocrStats: () => api.get<any>('/purchase/ocr/stats'),
+};
+
+export const productionApi = {
+  workOrders: (p?: any) => api.get<ListResult<any>>('/production/work-orders', p),
+  workOrderOptions: () => api.get<any[]>('/production/work-orders/options'),
+  workOrderDetail: (id: number) => api.get<any>(`/production/work-orders/${id}`),
+  forReceiptByWo: (id: number) => api.get<any>(`/production/work-orders/${id}/for-receipt`),
+  createWorkOrder: (b: any) => api.post<{ id: number }>('/production/work-orders', b),
+  updateWorkOrder: (id: number, b: any) => api.put<{ id: number }>(`/production/work-orders/${id}`, b),
+  deleteWorkOrder: (id: number) => api.del<{ id: number }>(`/production/work-orders/${id}`),
+
+  issues: (p?: any) => api.get<ListResult<any>>('/production/issues', p),
+  issueDetail: (id: number) => api.get<any>(`/production/issues/${id}`),
+  forReceiptByIssue: (id: number) => api.get<any>(`/production/issues/${id}/for-receipt`),
+  createIssue: (b: any) => api.post<{ id: number }>('/production/issues', b),
+  undoIssue: (id: number) => api.post<{ id: number }>(`/production/issues/${id}/undo`),
+
+  receipts: (p?: any) => api.get<ListResult<any>>('/production/receipts', p),
+  receiptDetail: (id: number) => api.get<any>(`/production/receipts/${id}`),
+  createReceipt: (b: any) => api.post<{ id: number }>('/production/receipts', b),
+  undoReceipt: (id: number) => api.post<{ id: number }>(`/production/receipts/${id}/undo`),
+};
+
+export const saleApi = {
+  orders: (p?: any) => api.get<ListResult<any>>('/sale/orders', p),
+  orderDetail: (id: number) => api.get<any>(`/sale/orders/${id}`),
+  createOrder: (b: any) => api.post<{ id: number }>('/sale/orders', b),
+
+  deliveries: (p?: any) => api.get<ListResult<any>>('/sale/deliveries', p),
+  createDelivery: (b: any) => api.post<{ id: number }>('/sale/deliveries', b),
+  undoDelivery: (id: number) => api.post<{ id: number }>(`/sale/deliveries/${id}/undo`),
+
+  returns: (p?: any) => api.get<ListResult<any>>('/sale/returns', p),
+  createReturn: (b: any) => api.post<{ id: number }>('/sale/returns', b),
+  undoReturn: (id: number) => api.post<{ id: number }>(`/sale/returns/${id}/undo`),
+};
+
+export const warehouseApi = {
+  materialSales: (p?: any) => api.get<ListResult<any>>('/warehouse/material-sales', p),
+  createMaterialSale: (b: any) => api.post<{ id: number }>('/warehouse/material-sales', b),
+  undoMaterialSale: (id: number) => api.post<{ id: number }>(`/warehouse/material-sales/${id}/undo`),
+
+  defectives: (p?: any) => api.get<ListResult<any>>('/warehouse/defectives', p),
+  createDefective: (b: any) => api.post<{ id: number }>('/warehouse/defectives', b),
+  undoDefective: (id: number) => api.post<{ id: number }>(`/warehouse/defectives/${id}/undo`),
+
+  checks: (p?: any) => api.get<ListResult<any>>('/warehouse/checks', p),
+  checkDetail: (id: number) => api.get<any>(`/warehouse/checks/${id}`),
+  createCheck: (b: any) => api.post<{ id: number }>('/warehouse/checks', b),
+  auditCheck: (id: number) => api.post<{ id: number }>(`/warehouse/checks/${id}/audit`),
+  undoCheck: (id: number) => api.post<{ id: number }>(`/warehouse/checks/${id}/undo`),
+
+  simulate: (items: any[]) => api.post<any>('/warehouse/simulate', { items }),
+  simulateToWorkOrders: (items: any[]) => api.post<any>('/warehouse/simulate/to-work-orders', { items }),
+
+  alarm: (p?: any) => api.get<any>('/warehouse/alarm', p),
+};
+
+export const financeApi = {
+  payables: () => api.get<any[]>('/finance/payables'),
+  payableDocs: (supplierId: number) =>
+    api.get<{ supplier: any; docs: any[] }>(`/finance/payables/${supplierId}/docs`),
+  previewSettle: (b: any) => api.post<any>('/finance/settlements/preview', b),
+  settlements: (p?: any) => api.get<ListResult<any>>('/finance/settlements', p),
+  settlementDetail: (id: number) =>
+    api.get<{ settlement: any; items: any[] }>(`/finance/settlements/${id}`),
+  createSettlement: (b: any) => api.post<{ id: number }>('/finance/settlements', b),
+  undoSettlement: (id: number) => api.post<{ id: number }>(`/finance/settlements/${id}/undo`),
+};
+
+export const reportApi = {
+  meta: () => api.get<any[]>('/reports/meta'),
+  data: (p: any) => api.get<{ columns: any[]; rows: any[]; meta: any }>('/reports/data', p),
+};
+
+export const printApi = {
+  templates: () => api.get<any[]>('/system/print/templates'),
+  template: (docType: string) => api.get<any>(`/system/print/templates/${docType}`),
+  saveTemplate: (docType: string, b: any) => api.put<any>(`/system/print/templates/${docType}`, b),
+  resetTemplate: (docType: string) => api.post<any>(`/system/print/templates/${docType}/reset`),
+  fields: (docType: string) => api.get<any>(`/system/print/fields/${docType}`),
+  preview: (b: any) => api.post<{ html: string }>('/system/print/preview', b),
+  /** 打印页地址：返回完整 HTML，直接用 window.open 打开再调 print() */
+  renderUrl: (docType: string, id: number) =>
+    `${API_BASE}/system/print/render/${docType}/${id}?token=${encodeURIComponent(getToken() ?? '')}`,
+};
+
+export const importApi = {
+  kinds: () => api.get<any[]>('/system/import/kinds'),
+  preview: (b: any) => api.post<{ total: number; errors: any[] }>('/system/import/preview', b),
+  execute: (b: any) =>
+    api.post<{ total: number; success: number; failed: number; errors: any[] }>(
+      '/system/import/execute',
+      b,
+    ),
+  logs: () => api.get<any[]>('/system/import/logs'),
+};
+
+export const systemApi = {
+  users: (p?: any) => api.get<ListResult<any>>('/system/users', p),
+  createUser: (b: any) => api.post<{ id: number }>('/system/users', b),
+  updateUser: (id: number, b: any) => api.put<{ id: number }>(`/system/users/${id}`, b),
+  changePassword: (id: number, newPassword: string, confirmPassword: string) =>
+    api.post<{ id: number; kicked: boolean }>(`/system/users/${id}/password`, {
+      newPassword,
+      confirmPassword,
+    }),
+  logs: (p?: any) => api.get<ListResult<any>>('/system/logs', p),
+  roles: () => api.get<{ value: string; label: string }[]>('/system/roles'),
+};
