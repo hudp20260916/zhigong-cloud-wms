@@ -1,5 +1,5 @@
 /** 采购闭环端到端冒烟：拆单 → 入库 → 撤销回滚，校验库存与台账一致性 */
-const BASE = 'http://127.0.0.1:3001/api';
+const BASE = process.env.API_BASE ?? 'http://127.0.0.1:3001/api';
 
 async function call(method, path, body, token) {
   const res = await fetch(BASE + path, {

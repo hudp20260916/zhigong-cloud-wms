@@ -43,6 +43,11 @@ cd "$APP_DIR"
 npm ci
 
 echo "==> 4/6 构建前端（产物 web/dist，由后端直接托管）"
+# 坑：npm 在某些环境会漏装 rollup 的原生二进制，
+# 导致 vite build 报 "Cannot find module '@rollup/rollup-linux-x64-gnu'"，这里兜底补装
+if [ ! -d node_modules/@rollup/rollup-linux-x64-gnu ]; then
+  npm i --no-save @rollup/rollup-linux-x64-gnu || true
+fi
 npm run build
 mkdir -p "$APP_DIR/server/data"
 
