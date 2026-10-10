@@ -3,7 +3,9 @@
  *   node server/scripts/smoke-finance.mjs
  * 覆盖：结算中心 / 报表中心 / 打印模板 / Excel 导入 / 系统参数 / 系统初始化（最后一次执行）
  */
-const BASE = process.env.BASE ?? 'http://localhost:3001';
+// 兼容两种写法：API_BASE 带 /api 后缀，BASE 不带
+const API_BASE = process.env.API_BASE;
+const BASE = API_BASE ? API_BASE.replace(/\/api$/, '') : (process.env.BASE ?? 'http://localhost:3001');
 
 let token = '';
 let failures = 0;

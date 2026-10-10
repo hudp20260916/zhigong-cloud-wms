@@ -2,7 +2,9 @@
  * P6 工作台大屏 & OCR 建单 冒烟测试
  *   node server/scripts/smoke-ocr-dashboard.mjs
  */
-const BASE = process.env.BASE ?? 'http://localhost:3001';
+// 兼容两种写法：API_BASE 带 /api 后缀，BASE 不带
+const API_BASE = process.env.API_BASE;
+const BASE = API_BASE ? API_BASE.replace(/\/api$/, '') : (process.env.BASE ?? 'http://localhost:3001');
 
 let token = '';
 let failures = 0;

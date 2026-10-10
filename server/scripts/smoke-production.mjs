@@ -1,5 +1,5 @@
 /** P3 生产闭环冒烟：工单 → 领料/直扣 → 成品入库 → 防超产 / 局部缺料拦截 */
-const BASE = 'http://127.0.0.1:3001/api';
+const BASE = process.env.API_BASE ?? 'http://127.0.0.1:3001/api';
 
 async function call(method, path, body, token) {
   const res = await fetch(BASE + path, {

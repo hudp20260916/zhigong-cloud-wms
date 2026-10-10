@@ -32,7 +32,7 @@ import { summarize } from '@shared/enums';
 interface OrderRow {
   id: number;
   order_no: string;
-  parent_order_no?: string;
+  product_name?: string;
   summary?: string;
   supplier_name?: string;
   order_date: string;
@@ -226,7 +226,8 @@ export default function PurchaseOrderPage() {
         items: lines.map((i) => ({ materialId: i.materialId, qty: i.qty, price: i.price })),
         productId: mode === 'bom' ? productId ?? null : null,
         planQty: mode === 'bom' ? planQty : null,
-        bomVersion: mode === 'bom' ? bomVersion || null : null,
+        // 后端已放开 nullish，这里同步改成「不传」更符合可选项语义，双保险
+        bomVersion: mode === 'bom' ? bomVersion || undefined : undefined,
         orderDate: header.orderDate,
         expectedDate: header.expectedDate,
         remark: header.remark,
@@ -253,9 +254,9 @@ export default function PurchaseOrderPage() {
       extra={
         <Space>
           <Input.Search
-            placeholder="单号 / 摘要 / 供应商"
+            placeholder="单号 / 摘要 / 供应商 / 主产品 / 物料"
             allowClear
-            style={{ width: 220 }}
+            style={{ width: 280 }}
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
@@ -264,7 +265,7 @@ export default function PurchaseOrderPage() {
                 `采购订单_${today()}`,
                 [
                   { title: '订单编号', key: 'order_no' },
-                  { title: '父订单号', key: 'parent_order_no' },
+                  { title: '主产品名称', key: 'product_name' },
                   { title: '采购摘要', key: 'summary' },
                   { title: '供应商', key: 'supplier_name' },
                   { title: '下单日期', key: 'order_date' },
@@ -299,7 +300,14 @@ export default function PurchaseOrderPage() {
         }}
         columns={[
           { title: '订单编号', dataIndex: 'order_no', width: 160 },
-          { title: '父订单号', dataIndex: 'parent_order_no', width: 150, render: (v) => v || '-' },
+          {
+            title: '主产品名称',
+            dataIndex: 'product_name',
+            width: 180,
+            ellipsis: true,
+            // 直接采购物料的订单没有主产品
+            render: (v) => (v ? <Tooltip title={v}>{v}</Tooltip> : <Typography.Text type="secondary">-</Typography.Text>),
+          },
           {
             title: '采购摘要',
             dataIndex: 'summary',

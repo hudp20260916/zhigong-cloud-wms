@@ -181,7 +181,7 @@ export default function MainLayout() {
         <Sider width={200} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
           <div className="app-logo">
             <FileTextOutlined />
-            智工云仓
+            啊平智能
           </div>
           {menu}
         </Sider>
@@ -196,7 +196,7 @@ export default function MainLayout() {
           styles={{ body: { padding: 0 } }}
           title={
             <span>
-              <FileTextOutlined /> 智工云仓
+              <FileTextOutlined /> 啊平智能
             </span>
           }
         >

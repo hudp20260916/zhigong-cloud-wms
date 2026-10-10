@@ -2,7 +2,7 @@
   "name": "zhigong-cloud-wms",
   "version": "1.4.6",
   "private": true,
-  "description": "智工云仓 - 小家电生产组装进销存管理系统",
+  "description": "啊平智能 - 小家电生产组装进销存管理系统",
   "workspaces": [
     "server",
     "web"

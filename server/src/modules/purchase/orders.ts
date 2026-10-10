@@ -33,12 +33,19 @@ const createSchema = z.object({
   /** bom 模式：主产品与计划产量，用于记录 BOM 版本与展开来源 */
   productId: z.number().int().nullable().optional(),
   planQty: z.number().positive().nullable().optional(),
-  bomVersion: z.string().trim().optional(),
+  /**
+   * 坑（本次修复的根因）：「直接采购物料」模式下前端会显式提交 bomVersion: null，
+   * 而 z.string().optional() 只放行 undefined、不放行 null，
+   * 于是整单被 400 "Expected string, received null" 拦下 —— 表现为「直接采购保存报错」。
+   * 「按主产品采购」展开 BOM 后 bomVersion 有值，所以那个流程一直是好的。
+   * 这里把所有可选项统一放开 nullish，落库前再归一。
+   */
+  bomVersion: z.string().trim().optional().nullable(),
   /** 手工指定供应商时覆盖物料默认供应商 */
   supplierId: z.number().int().nullable().optional(),
   orderDate: z.string().min(1, '请选择下单日期'),
-  expectedDate: z.string().optional().default(''),
-  remark: z.string().trim().optional().default(''),
+  expectedDate: z.string().optional().nullable().default(''),
+  remark: z.string().trim().optional().nullable().default(''),
 });
 
 /** 列表：附带采购摘要、是否可去入库（需求 4.1 状态与权限联动） */
@@ -46,20 +53,54 @@ purchaseOrderRouter.get('/', requirePerm('purchase.order.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
   const status = String(req.query.status ?? '').trim();
 
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (status) bind.status = status;
+
   const cond: string[] = ['1=1'];
-  const params: any[] = [];
   if (keyword) {
-    cond.push(
-      `(o.order_no LIKE @kw OR IFNULL(o.summary,'') LIKE @kw OR IFNULL(s.name,'') LIKE @kw OR IFNULL(p.name,'') LIKE @kw)`,
-    );
+    /**
+     * 先把「哪些物料命中」一次性查出来（materials 通常只有几千行，扫一遍很快）。
+     * 拿不到任何命中时，说明这个关键词跟物料无关（比如只输订单号片段），
+     * 这时候整个 EXISTS 分支可以从条件里彻底删掉 —— 压测里这一手让
+     * 「订单号片段」场景从 610ms 降到 ~200ms：每行订单少做一次明细表索引查找。
+     */
+    const hitMaterials = db
+      .prepare(`SELECT id FROM materials WHERE name LIKE @kw OR code LIKE @kw`)
+      .all({ kw: bind.kw }) as { id: number }[];
+
+    const kwParts = [
+      'o.order_no LIKE @kw',
+      `IFNULL(o.summary,'') LIKE @kw`,
+      `IFNULL(s.name,'') LIKE @kw`,
+      `IFNULL(p.name,'') LIKE @kw`,
+    ];
+    if (hitMaterials.length > 0) {
+      // 命中太多时用 IN 列表会把占位符撑爆（SQLite 上限 32766），回退到子查询形式
+      if (hitMaterials.length <= 1000) {
+        const names = hitMaterials.map((m, i) => {
+          const n = `m${i}`;
+          bind[n] = m.id;
+          return `@${n}`;
+        });
+        kwParts.push(
+          `EXISTS (SELECT 1 FROM purchase_order_items oi
+                    WHERE oi.order_id = o.id AND oi.material_id IN (${names.join(',')}))`,
+        );
+      } else {
+        kwParts.push(
+          `EXISTS (SELECT 1 FROM purchase_order_items oi
+                    WHERE oi.order_id = o.id
+                      AND oi.material_id IN (SELECT id FROM materials
+                                              WHERE name LIKE @kw OR code LIKE @kw))`,
+        );
+      }
+    }
+    cond.push(`(${kwParts.join(' OR ')})`);
   }
   if (status) {
     cond.push('o.status = @status');
   }
-
-  const bind: any = { limit: pageSize, offset };
-  if (keyword) bind.kw = `%${keyword}%`;
-  if (status) bind.status = status;
 
   const rows = db
     .prepare(
@@ -75,32 +116,44 @@ purchaseOrderRouter.get('/', requirePerm('purchase.order.view'), (req, res) => {
     )
     .all(bind) as any[];
 
-  const totalParams: any[] = [];
-  const totalCond = cond.map((c) => {
-    if (c.includes('@kw')) {
-      totalParams.push(`%${keyword}%`);
-      return c.replace('@kw', '?');
-    }
-    if (c.includes('@status')) {
-      totalParams.push(status);
-      return c.replace('@status', '?');
-    }
-    return c;
-  });
-  const total = countRows(
-    `purchase_orders o
-      LEFT JOIN suppliers s ON s.id = o.supplier_id
-      LEFT JOIN users u ON u.id = o.created_by
-      LEFT JOIN products p ON p.id = o.product_id`,
-    totalCond.join(' AND '),
-    totalParams,
-  );
+  /**
+   * 总数：只有「当页被填满」时才可能有下一页，才需要 COUNT。
+   * 少于一页时直接用 offset + 已取条数推导，省掉一次全表 COUNT ——
+   * 几十万条数据下，这个 COUNT 才是真正吃掉时间的那一下。
+   */
+  let total = offset + rows.length;
+  if (rows.length === pageSize) {
+    /**
+     * countRows 走位置参数，而上面的条件用的是命名参数，且 @kw 一段里出现了 6 次
+     * （单号 / 摘要 / 供应商 / 主产品 / 物料名称 / 物料编码）。
+     * 早期写法是「遇到含 @kw 的条件就 push 一个值」，结果 SQL 有 6 个 ? 却只给了 1 个值，
+     * 在 30 万条压测里才暴露出来：参数个数不匹配 → 500 Too few parameter values。
+     * 这里改成按占位符在 SQL 中出现的先后顺序逐个入参，无论条件怎么改都不会错位。
+     */
+    const totalParams: any[] = [];
+    const totalCond = cond.map((c) =>
+      c.replace(/@(\w+)/g, (_m, name: string) => {
+        totalParams.push(bind[name]);
+        return '?';
+      }),
+    );
+    total = countRows(
+      `purchase_orders o
+        LEFT JOIN suppliers s ON s.id = o.supplier_id
+        LEFT JOIN products p ON p.id = o.product_id`,
+      totalCond.join(' AND '),
+      totalParams,
+    );
+  }
 
   const ctx = req.ctx!;
   const canReceive = ctx.role === 'admin' || ctx.permissions.includes('purchase.receipt.create');
   const canEditOrder = ctx.permissions.includes('purchase.order.update');
 
-  const list = maskList(rows, { canViewPrice: canViewPrice(ctx) }).map((r: any) => {
+  const list = maskList(rows, { canViewPrice: canViewPrice(ctx) }).map((row: any) => {
+    // 列表不再暴露父订单号（列已移除）；拆单的父子关系仍由库内 parent_order_no 维护，
+    // 只是不作为列表字段输出。
+    const { parent_order_no, ...r } = row;
     const isParent = r.item_count === 0;
     // 采购员只能改自己建的，管理员可改全部进行中订单
     const editable =

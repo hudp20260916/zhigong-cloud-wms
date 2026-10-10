@@ -1,5 +1,5 @@
 /** P4 销售与仓储作业冒烟 */
-const BASE = 'http://127.0.0.1:3001/api';
+const BASE = process.env.API_BASE ?? 'http://127.0.0.1:3001/api';
 
 async function call(method, path, body, token) {
   const res = await fetch(BASE + path, {

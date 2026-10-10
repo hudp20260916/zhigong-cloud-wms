@@ -89,6 +89,6 @@ INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES
   ('alert.severeRatio',     '0.5', datetime('now')),   -- 低于安全库存 50% 判定严重缺货
   ('alert.overStockRatio',  '3',   datetime('now')),   -- 高于安全库存 N 倍判定超储
   ('alert.idleDays',        '60',  datetime('now')),   -- 呆滞库存天数
-  ('company.name',          '智工云仓', datetime('now')),
+  ('company.name',          '啊平智能', datetime('now')),
   ('company.phone',         '',    datetime('now')),
   ('company.address',       '',    datetime('now'));

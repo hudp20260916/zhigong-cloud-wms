@@ -372,7 +372,7 @@ function setting(key: string): string {
 
 function companyInfo() {
   return {
-    companyName: setting('company.name') || '智工云仓',
+    companyName: setting('company.name') || '啊平智能',
     companyPhone: setting('company.phone'),
     companyAddress: setting('company.address'),
   };

@@ -34,7 +34,7 @@ export default function LoginPage() {
     >
       <Card style={{ width: 380 }} styles={{ body: { padding: 28 } }}>
         <Typography.Title level={4} style={{ marginBottom: 4 }}>
-          智工云仓
+          啊平智能
         </Typography.Title>
         <Typography.Text type="secondary">小家电生产组装进销存管理系统</Typography.Text>
 
