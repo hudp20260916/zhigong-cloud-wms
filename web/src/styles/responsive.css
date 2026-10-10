@@ -390,3 +390,23 @@
     font-size: 15px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * 表格行状态色（全局）
+ * .row-error  导入预览等场景里「该行有问题」——此前这个类只在代码里被引用，
+ *             但没有任何样式定义，所以错误行其实一直是没高亮的，这里补上。
+ * .row-muted  整行为空、导入时会被跳过的行，做弱化处理。
+ * ------------------------------------------------------------------------- */
+.row-error > td {
+  background: #fff2f0 !important;
+}
+.row-error:hover > td {
+  background: #ffe3e0 !important;
+}
+.row-muted > td {
+  background: #fafafa !important;
+  color: #bbb;
+}
+.row-muted:hover > td {
+  background: #f5f5f5 !important;
+}

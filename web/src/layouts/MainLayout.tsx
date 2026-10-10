@@ -15,6 +15,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { ROLE_LABEL, type Role } from '@shared/permissions';
+import { BRAND_NAME } from '../brand';
 import { useAuthStore } from '../stores/auth';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -181,7 +182,7 @@ export default function MainLayout() {
         <Sider width={200} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
           <div className="app-logo">
             <FileTextOutlined />
-            啊平智能
+            {BRAND_NAME}
           </div>
           {menu}
         </Sider>
@@ -196,7 +197,7 @@ export default function MainLayout() {
           styles={{ body: { padding: 0 } }}
           title={
             <span>
-              <FileTextOutlined /> 啊平智能
+              <FileTextOutlined /> {BRAND_NAME}
             </span>
           }
         >

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth';
+import { BRAND_NAME, BRAND_SUBTITLE } from '../../brand';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -34,9 +35,9 @@ export default function LoginPage() {
     >
       <Card style={{ width: 380 }} styles={{ body: { padding: 28 } }}>
         <Typography.Title level={4} style={{ marginBottom: 4 }}>
-          啊平智能
+          {BRAND_NAME}
         </Typography.Title>
-        <Typography.Text type="secondary">小家电生产组装进销存管理系统</Typography.Text>
+        <Typography.Text type="secondary">{BRAND_SUBTITLE}</Typography.Text>
 
         {params.get('expired') === '1' && (
           <Alert

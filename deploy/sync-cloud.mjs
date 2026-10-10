@@ -149,7 +149,8 @@ async function main() {
       return;
     }
     console.log('\n全部完成 ✓');
-    console.log(await checkTail(manifest));
+    console.log(`外网访问：http://${HOST}`);
+    console.log(`本次备份保留在云端 ${APP}/backups/update-${STAMP}.tar.gz`);
   });
 }
 

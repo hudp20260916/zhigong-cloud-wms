@@ -7,6 +7,10 @@ import './styles.css';
 import './styles/responsive.css';
 import './utils/keyboard';
 import App from './App';
+import { BRAND_FULL_TITLE } from './brand';
+
+// 浏览器标签标题统一取自 brand.ts，避免 index.html 里还要再改一遍
+document.title = BRAND_FULL_TITLE;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
