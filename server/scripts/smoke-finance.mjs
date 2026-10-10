@@ -286,6 +286,23 @@ async function main() {
   check('预警看板读取配置阈值', !!alarm.cards, JSON.stringify(alarm.cards));
 
   console.log('\n== P5 冒烟：系统初始化（放在最后，会清空数据） ==');
+
+  /**
+   * 安全护栏（事故教训）：本步骤会真实清空目标库的业务单据与基础档案。
+   * 曾经因为没有显式指定 BASE，脚本按默认值连到本机 3001 的开发演示库，
+   * 结果把本地演示数据全清了。
+   * 因此：只要目标仍是默认地址且没有显式声明「我知道这是破坏性操作」，
+   * 就跳过这一步并给出提示，而不是闷头执行。
+   */
+  const isDefaultTarget = /^https?:\/\/(localhost|127\.0\.0\.1):3001\/?$/.test(BASE);
+  const allowed = process.env.ALLOW_SYSTEM_INIT === '1';
+  if (isDefaultTarget && !allowed) {
+    console.log('  ⚠ 已跳过：目标是默认开发库且未设置 ALLOW_SYSTEM_INIT=1');
+    console.log('    本步骤会清空业务单据与基础档案。请显式指定临时库：');
+    console.log('    rm -f server/data/rp.db*');
+    console.log('    DB_FILE=server/data/rp.db PORT=3093 npx tsx server/src/index.ts');
+    console.log('    ALLOW_SYSTEM_INIT=1 API_BASE=http://127.0.0.1:3093 node server/scripts/smoke-finance.mjs');
+  } else {
   const pv2 = await call('GET', '/api/system/init/preview');
   check('预检返回待清空统计', Array.isArray(pv2.groups) && pv2.groups.length === 2);
   console.log(`    待清空：${pv2.groups.map((g) => `${g.label} ${g.total}`).join('，')}`);
@@ -349,6 +366,7 @@ async function main() {
 
   console.log(`\n${failures === 0 ? '✅ P5 全部通过' : `❌ ${failures} 项失败`}`);
   if (failures > 0) process.exit(1);
+  }
 }
 
 main().catch((e) => {

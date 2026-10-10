@@ -164,8 +164,22 @@ const bad = multi.filter((r) => {
 });
 check('摘要均为统一格式', bad.length === 0, bad.length ? `异常：${bad.map((b) => b.summary).join(' | ')}` : `抽查 ${multi.length} 条`);
 
+console.log('\n[8] COUNT 分支回归（曾因参数个数错位导致 500）');
+{
+  // 命中条数多于一页时才会走「全 COUNT」分支。
+  // 旧实现把 @kw 替换成 6 个 ? 却只给 1 个参数值 → 500 Too few parameter values。
+  // 这里故意用很小的 pageSize 逼出该分支：只要当页被填满，就会触发 COUNT。
+  const wide = await api('GET', '/purchase/orders?keyword=2026&pageSize=2', undefined, H);
+  check('关键词命中多于一页时可正常返回总数', wide.status === 200 && Number(wide.data?.total) > 2,
+    `status=${wide.status} total=${wide.data?.total}`);
+
+  const combo = await api('GET', '/purchase/orders?keyword=2026&status=进行中&pageSize=2', undefined, H);
+  check('关键词 + 状态叠加时 COUNT 参数不错位', combo.status === 200,
+    `status=${combo.status} total=${combo.data?.total}  ${combo.message ?? ''}`);
+}
+
 if (BULK) {
-  console.log('\n[8] 大数据量性能（需先灌数据）');
+  console.log('\n[9] 大数据量性能（需先灌数据）');
   for (const kw of ['PO', '发热', '']) {
     const t0 = Date.now();
     const r = await api('GET', `/purchase/orders?keyword=${encodeURIComponent(kw)}&pageSize=20`, undefined, H);

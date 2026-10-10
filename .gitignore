@@ -4,6 +4,9 @@ dist/
 server/data/*.db
 server/data/*.db-journal
 server/data/*.db-*
+server/data/*.db-license
+# 本地重灌种子前的数据快照（mysqlite 的原始庫和 WAL 复制HTTP），同样不入库
+server/data/backup*/
 *.log
 .DS_Store
 .vite/
