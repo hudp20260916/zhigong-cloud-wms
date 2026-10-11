@@ -6,8 +6,18 @@ import { ResponsiveTable } from './ResponsiveTable';
 import { DockAction } from './DockAction';
 import ImportExcelModal from './ImportExcelModal';
 import { CopyableCode } from './CopyableCode';
+import { DetailTable } from './DetailTable';
+import { FilterBar } from './FilterBar';
 
-export { PrintButton, ResponsiveTable, DockAction, ImportExcelModal, CopyableCode };
+export {
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  ImportExcelModal,
+  CopyableCode,
+  DetailTable,
+  FilterBar,
+};
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
 export function PermGate({

@@ -15,9 +15,18 @@ import {
   message,
 } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { purchaseApi } from '../../api';
+import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -34,6 +43,7 @@ interface ItemRow {
 export default function PurchaseReturnPage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) => purchaseApi.returns(p));
   const [receipts, setReceipts] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [receiptId, setReceiptId] = useState<number | undefined>();
   const [returnDate, setReturnDate] = useState(today());
@@ -46,6 +56,7 @@ export default function PurchaseReturnPage() {
       .receipts({ pageSize: 200 })
       .then((r) => setReceipts(r.list.filter((x: any) => x.status === '有效')))
       .catch(() => undefined);
+    archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
   }, []);
 
   async function pickReceipt(id: number) {
@@ -104,7 +115,9 @@ export default function PurchaseReturnPage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 8：导出跟随筛选结果
+              const res = await purchaseApi.returns({ ...params, page: 1, pageSize: 50000 });
               exportCsv(`采购退货_${today()}`, [
                 { title: '退货单号', key: 'return_no' },
                 { title: '退货日期', key: 'return_date' },
@@ -112,8 +125,8 @@ export default function PurchaseReturnPage() {
                 { title: '退货内容', key: 'material_names' },
                 { title: '金额', key: 'total_amount' },
                 { title: '状态', key: 'status' },
-              ], list)
-            }
+              ], res.list ?? []);
+            }}
           >
             导出
           </Button>
@@ -129,6 +142,43 @@ export default function PurchaseReturnPage() {
         </Space>
       }
     >
+      {/* 需求 8：日期区间 + 供应商 + 物料包含字筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', supplierId: '', materialKeyword: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="供应商"
+          value={params.supplierId || undefined}
+          onChange={(v) => patchParams({ supplierId: v ?? '' })}
+          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

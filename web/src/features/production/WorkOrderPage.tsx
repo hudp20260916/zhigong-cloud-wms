@@ -174,7 +174,10 @@ export default function WorkOrderPage() {
                     去入库
                   </Button>
                 )}
-                {r.issued_qty === 0 && (
+                {/* 需求 9：只要「实际领料合计 < 计划产量」就继续开放去领料。
+                    原写法是 issued_qty === 0，导致领过一次料（哪怕远少于计划）按钮就消失，
+                    剩下的料再也领不了。 */}
+                {Number(r.issued_qty ?? 0) < Number(r.plan_qty ?? 0) && (
                   <Button
                     type="link"
                     size="small"

@@ -19,7 +19,17 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  DetailTable,
+} from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -27,6 +37,8 @@ export default function IssuePage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) =>
     productionApi.issues(p),
   );
+  // 需求 10：点击行展开领料明细
+  const detail = useRowDetail((id: number) => productionApi.issueDetail(id));
   const navigate = useNavigate();
   const location = useLocation();
   const [options, setOptions] = useState<any[]>([]);
@@ -124,6 +136,27 @@ export default function IssuePage() {
         loading={loading}
         dataSource={list}
         scroll={{ x: 1400 }}
+        // 需求 10：点击行展开领料明细
+        expandable={{
+          expandedRowRender: (r) => (
+            <DetailTable
+              loading={detail.loading[r.id]}
+              items={detail.cache[r.id]?.items ?? []}
+              columns={[
+                { title: '物料编码', dataIndex: 'code', width: 130 },
+                { title: '物料名称', dataIndex: 'name', width: 180 },
+                { title: '规格', dataIndex: 'spec', width: 150 },
+                { title: '单位', dataIndex: 'unit', width: 70 },
+                { title: '领料数量', dataIndex: 'qty', width: 100, className: 'mono' },
+                { title: '库存', dataIndex: 'stock', width: 90, className: 'mono' },
+                { title: '备注', dataIndex: 'remark' },
+              ]}
+            />
+          ),
+          onExpand: (expanded, r) => {
+            if (expanded) void detail.load(r.id);
+          },
+        }}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,

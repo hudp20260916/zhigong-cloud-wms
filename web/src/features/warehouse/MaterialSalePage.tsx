@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useLocation } from 'react-router-dom';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
@@ -18,11 +19,30 @@ export default function MaterialSalePage() {
   const [saleDate, setSaleDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  const location = useLocation();
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
     archiveApi.customers({ pageSize: 200 }).then((r) => setCustomers(r.list)).catch(() => undefined);
   }, []);
+
+  // 需求 22：从库存预警看板「呆滞库存 → 销售处理」跳过来时，自动带出该物料并直接打开新增弹窗。
+  // 要等 materialOptions 加载完才能取到库存与成本，所以用 ref 保证只认领一次。
+  const prefillHandled = useRef(false);
+  useEffect(() => {
+    const st: any = location.state;
+    const mid = st?.prefill?.materialId;
+    if (!mid || prefillHandled.current || materials.length === 0) return;
+    prefillHandled.current = true;
+    const m = materials.find((x) => x.id === mid);
+    setItems([
+      { key: String(mid), materialId: mid, qty: 1, price: Number(m?.avg_cost ?? 0), stock: m?.current_stock },
+    ]);
+    setCustomerId(undefined);
+    setSaleDate(today());
+    setRemark('');
+    setOpen(true);
+  }, [location.state, materials]);
 
   async function submit() {
     const lines = items.filter((i) => i.materialId && i.qty > 0);

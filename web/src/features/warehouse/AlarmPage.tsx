@@ -132,10 +132,15 @@ export default function AlarmPage() {
                 return (
                   <Space size={0}>
                     <PermGate permission="warehouse.materialSale.create">
-                      <Button type="link" size="small" onClick={() => navigate('/warehouse/material-sales')}>销售处理</Button>
+                      {/* 需求 22：带出物料，跳过去直接就是这张单 */}
+                      <Button type="link" size="small" onClick={() => navigate('/warehouse/material-sales', {
+                        state: { prefill: { materialId: r.id, materialName: r.name } },
+                      })}>销售处理</Button>
                     </PermGate>
                     <PermGate permission="warehouse.defective.create">
-                      <Button type="link" size="small" onClick={() => navigate('/warehouse/defectives')}>不良品处理</Button>
+                      <Button type="link" size="small" onClick={() => navigate('/warehouse/defectives', {
+                        state: { prefill: { materialId: r.id, materialName: r.name } },
+                      })}>不良品处理</Button>
                     </PermGate>
                   </Space>
                 );

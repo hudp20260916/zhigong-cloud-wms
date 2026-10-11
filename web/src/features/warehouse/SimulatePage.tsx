@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Alert, Button, Card, Empty, InputNumber, Select, Space, Table, Tag, message } from 'antd';
 import { archiveApi, warehouseApi } from '../../api';
 import { exportCsv, today } from '../../utils/exportCsv';
-import { ResponsiveTable } from '../../components';
+import { PermGate, ResponsiveTable } from '../../components';
 
 interface Row { key: string; productId?: number; qty: number; stock?: number }
 
@@ -120,7 +120,29 @@ export default function SimulatePage() {
               { title: '现有库存', dataIndex: 'stock', width: 100, className: 'mono' },
               { title: '待生产量', dataIndex: 'needProduce', width: 110, className: 'mono',
                 render: (v) => <span style={{ color: Number(v) > 0 ? '#cf1322' : undefined }}>{v}</span> },
-              { title: '结论', width: 120, render: (_v, r: any) => r.needProduce > 0 ? <Tag color="red">需排产</Tag> : <Tag color="green">库存充足</Tag> },
+              {
+                title: '结论',
+                width: 150,
+                // 需求 23：点击「需排产」直接跳转工单页，并带出该成品与建议排产量
+                render: (_v, r: any) =>
+                  r.needProduce > 0 ? (
+                    <PermGate permission="production.wo.create">
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() =>
+                          navigate('/production/work-orders', {
+                            state: { prefill: { productId: r.productId, planQty: r.needProduce } },
+                          })
+                        }
+                      >
+                        需排产 {r.needProduce}
+                      </Button>
+                    </PermGate>
+                  ) : (
+                    <Tag color="green">库存充足</Tag>
+                  ),
+              },
             ]} />
 
           <div style={{ fontWeight: 500, marginBottom: 8 }}>子物料需求与缺口</div>
@@ -133,7 +155,29 @@ export default function SimulatePage() {
               { title: '现有库存', dataIndex: 'stock', width: 100, className: 'mono' },
               { title: '缺口', dataIndex: 'gapQty', width: 100, className: 'mono',
                 render: (v) => <span style={{ color: Number(v) > 0 ? '#cf1322' : undefined }}>{v}</span> },
-              { title: '结论', width: 120, render: (_v, r: any) => r.gapQty > 0 ? <Tag color="red">需采购</Tag> : <Tag color="green">充足</Tag> },
+              {
+                title: '结论',
+                width: 150,
+                // 需求 23：对单条缺料直接发起采购，带出该物料（区别于顶部「按缺料去采购」的批量）
+                render: (_v, r: any) =>
+                  r.gapQty > 0 ? (
+                    <PermGate permission="purchase.order.create">
+                      <Button
+                        type="link"
+                        size="small"
+                        onClick={() =>
+                          navigate('/purchase/orders', {
+                            state: { prefill: { materialIds: [r.materialId] } },
+                          })
+                        }
+                      >
+                        去采购 {r.gapQty}
+                      </Button>
+                    </PermGate>
+                  ) : (
+                    <Tag color="green">充足</Tag>
+                  ),
+              },
             ]} />
         </>
       )}

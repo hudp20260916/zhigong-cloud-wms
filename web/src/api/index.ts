@@ -108,6 +108,7 @@ export const saleApi = {
   createOrder: (b: any) => api.post<{ id: number }>('/sale/orders', b),
 
   deliveries: (p?: any) => api.get<ListResult<any>>('/sale/deliveries', p),
+  deliveryDetail: (id: number) => api.get<any>(`/sale/deliveries/${id}`),
   createDelivery: (b: any) => api.post<{ id: number }>('/sale/deliveries', b),
   undoDelivery: (id: number) => api.post<{ id: number }>(`/sale/deliveries/${id}/undo`),
 

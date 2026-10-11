@@ -56,6 +56,12 @@ function purchaseContent(orderId: number | null | undefined, materialIds: number
 
 purchaseReceiptRouter.get('/', requirePerm('purchase.receipt.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
+  // 需求 6：按日期区间、供应商、物料名称/编码包含字筛选
+  const supplierId = Number(req.query.supplierId ?? 0) || 0;
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
   const cond: string[] = ['1=1'];
   const params: any[] = [];
   if (keyword) {
@@ -63,6 +69,25 @@ purchaseReceiptRouter.get('/', requirePerm('purchase.receipt.view'), (req, res) 
       `(IFNULL(s.name,'') LIKE ? OR EXISTS (SELECT 1 FROM purchase_receipt_items ri JOIN materials m ON m.id = ri.material_id WHERE ri.receipt_id = r.id AND (m.name LIKE ? OR m.code LIKE ?)))`,
     );
     params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+  if (supplierId) {
+    cond.push('r.supplier_id = ?');
+    params.push(supplierId);
+  }
+  if (dateFrom) {
+    cond.push('r.receipt_date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    cond.push('r.receipt_date <= ?');
+    params.push(dateTo);
+  }
+  if (materialKeyword) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM purchase_receipt_items ri JOIN materials m ON m.id = ri.material_id
+                WHERE ri.receipt_id = r.id AND (m.name LIKE ? OR m.code LIKE ?))`,
+    );
+    params.push(`%${materialKeyword}%`, `%${materialKeyword}%`);
   }
 
   const rows = db

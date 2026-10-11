@@ -157,6 +157,33 @@ saleRouter.get('/deliveries', requirePerm('sale.delivery.view'), (req, res) => {
   );
 });
 
+/** 出库单详情（需求 13：列表点击展开明细） */
+saleRouter.get('/deliveries/:id', requirePerm('sale.delivery.view'), (req, res) => {
+  const id = Number(req.params.id);
+  const delivery = db
+    .prepare(
+      `SELECT d.*, o.order_no, c.name AS customer_name, u.display_name AS operator_name
+         FROM sale_deliveries d
+         LEFT JOIN sale_orders o ON o.id = d.order_id
+         LEFT JOIN customers c ON c.id = d.customer_id
+         LEFT JOIN users u ON u.id = d.operator_id
+        WHERE d.id = ?`,
+    )
+    .get(id) as any;
+  if (!delivery) throw Err.notFound('出库单不存在');
+
+  const items = db
+    .prepare(
+      `SELECT i.*, p.code, p.name, p.spec, p.unit, p.current_stock
+         FROM sale_delivery_items i JOIN products p ON p.id = i.product_id
+        WHERE i.delivery_id = ?`,
+    )
+    .all(id) as any[];
+
+  const ctx = { canViewPrice: canViewPrice(req.ctx!) };
+  ok(res, { delivery: maskList([delivery], ctx)[0], items: maskList(items, ctx) });
+});
+
 /** 一键生成出库单：扣减成品库存，禁止负库存 */
 saleRouter.post('/deliveries', requirePerm('sale.delivery.create'), (req, res) => {
   const schema = z.object({

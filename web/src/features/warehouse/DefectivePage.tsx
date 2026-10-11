@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import { useLocation } from 'react-router-dom';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
@@ -18,10 +19,25 @@ export default function DefectivePage() {
   const [outDate, setOutDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  const location = useLocation();
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
   }, []);
+
+  // 需求 22：从库存预警看板「呆滞库存 → 不良品处理」跳过来时，自动带出该物料并打开新增弹窗
+  const prefillHandled = useRef(false);
+  useEffect(() => {
+    const st: any = location.state;
+    const mid = st?.prefill?.materialId;
+    if (!mid || prefillHandled.current || materials.length === 0) return;
+    prefillHandled.current = true;
+    const m = materials.find((x) => x.id === mid);
+    setItems([{ key: String(mid), materialId: mid, qty: 1, reason: '仓储破损', stock: m?.current_stock }]);
+    setOutDate(today());
+    setRemark('');
+    setOpen(true);
+  }, [location.state, materials]);
 
   async function submit() {
     const lines = items.filter((i) => i.materialId && i.qty > 0);

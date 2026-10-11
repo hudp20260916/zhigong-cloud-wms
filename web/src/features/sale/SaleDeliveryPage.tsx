@@ -4,12 +4,24 @@ import { Alert, Button, Card, DatePicker, Input, Modal, Popconfirm, Select, Spac
 import { PlusOutlined } from '@ant-design/icons';
 import { saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  DetailTable,
+} from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
 export default function SaleDeliveryPage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) => saleApi.deliveries(p));
+  // 需求 13：点击行（客户所在行）展开出库明细
+  const detail = useRowDetail((id: number) => saleApi.deliveryDetail(id));
   const navigate = useNavigate();
   const location = useLocation();
   const [orders, setOrders] = useState<any[]>([]);
@@ -74,6 +86,34 @@ export default function SaleDeliveryPage() {
         loading={loading}
         dataSource={list}
         scroll={{ x: 1200 }}
+        expandable={{
+          expandedRowRender: (r) => (
+            <DetailTable
+              loading={detail.loading[r.id]}
+              items={detail.cache[r.id]?.items ?? []}
+              columns={[
+                { title: '产品编码', dataIndex: 'code', width: 130 },
+                { title: '产品名称', dataIndex: 'name', width: 180 },
+                { title: '规格', dataIndex: 'spec', width: 150 },
+                { title: '单位', dataIndex: 'unit', width: 70 },
+                { title: '出库数量', dataIndex: 'qty', width: 100, className: 'mono' },
+                { title: '单价', dataIndex: 'price', width: 100, render: (v) => <PriceText value={v} /> },
+                {
+                  title: '金额',
+                  width: 110,
+                  className: 'mono',
+                  render: (_v, it) => (
+                    <PriceText value={Number(it.qty ?? 0) * Number(it.price ?? 0)} />
+                  ),
+                },
+                { title: '当前库存', dataIndex: 'current_stock', width: 100, className: 'mono' },
+              ]}
+            />
+          ),
+          onExpand: (expanded, r) => {
+            if (expanded) void detail.load(r.id);
+          },
+        }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
           { title: '出库单号', dataIndex: 'delivery_no', width: 160, render: (v) => <CopyableCode value={v} /> },

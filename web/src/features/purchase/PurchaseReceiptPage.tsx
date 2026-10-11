@@ -22,7 +22,18 @@ import {
 import { PlusOutlined, ScanOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  DetailTable,
+  FilterBar,
+} from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import OcrImportModal, { type OcrDraft } from './OcrImportModal';
@@ -44,6 +55,8 @@ export default function PurchaseReceiptPage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) =>
     purchaseApi.receipts(p),
   );
+  // 需求 6：点击行展开入库明细
+  const detail = useRowDetail((id: number) => purchaseApi.receiptDetail(id));
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -193,7 +206,9 @@ export default function PurchaseReceiptPage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 6：导出跟随筛选结果
+              const res = await purchaseApi.receipts({ ...params, page: 1, pageSize: 50000 });
               exportCsv(
                 `采购入库_${today()}`,
                 [
@@ -205,9 +220,9 @@ export default function PurchaseReceiptPage() {
                   { title: '状态', key: 'status' },
                   { title: '操作人', key: 'operator_name' },
                 ],
-                list,
-              )
-            }
+                res.list ?? [],
+              );
+            }}
           >
             导出
           </Button>
@@ -229,12 +244,78 @@ export default function PurchaseReceiptPage() {
         message="入库单号在全系统前端不可见（列表、导出、打印均已移除），后台保留唯一 ID 用于追溯与回滚"
       />
 
+      {/* 需求 6：日期区间 + 供应商 + 物料包含字筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', supplierId: '', materialKeyword: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="供应商"
+          value={params.supplierId || undefined}
+          onChange={(v) => patchParams({ supplierId: v ?? '' })}
+          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
         loading={loading}
         dataSource={list}
         scroll={{ x: 1300 }}
+        // 需求 6：点击行展开入库明细
+        expandable={{
+          expandedRowRender: (r) => (
+            <DetailTable
+              loading={detail.loading[r.id]}
+              items={detail.cache[r.id]?.items ?? []}
+              columns={[
+                { title: '物料编码', dataIndex: 'code', width: 130 },
+                { title: '物料名称', dataIndex: 'name', width: 180 },
+                { title: '规格', dataIndex: 'spec', width: 150 },
+                { title: '单位', dataIndex: 'unit', width: 70 },
+                { title: '入库数量', dataIndex: 'qty', width: 100, className: 'mono' },
+                { title: '单价', dataIndex: 'price', width: 100, render: (v) => <PriceText value={v} /> },
+                {
+                  title: '金额',
+                  width: 110,
+                  className: 'mono',
+                  render: (_v, it) => (
+                    <PriceText value={Number(it.qty ?? 0) * Number(it.price ?? 0)} />
+                  ),
+                },
+                { title: '备注', dataIndex: 'remark' },
+              ]}
+            />
+          ),
+          onExpand: (expanded, r) => {
+            if (expanded) void detail.load(r.id);
+          },
+        }}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,

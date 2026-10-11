@@ -1,12 +1,19 @@
-import { Button, Card, Input, Space, Table, Tag, Tooltip } from 'antd';
-import { purchaseApi } from '../../api';
+import { useEffect, useState } from 'react';
+import { Button, Card, DatePicker, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PriceText, ResponsiveTable, CopyableCode } from '../../components';
+import { PriceText, ResponsiveTable, CopyableCode, FilterBar } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
+import { dayVal } from '../../utils/date';
 
 /** 到货核对：采购内容列 + 主产品/物料名称搜索 + 导出同步包含采购内容（需求 3.4.5） */
 export default function ArrivalPage() {
   const { list, total, loading, params, patchParams } = useList<any>((p) => purchaseApi.arrivals(p));
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+
+  useEffect(() => {
+    archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
+  }, []);
 
   return (
     <Card
@@ -20,7 +27,9 @@ export default function ArrivalPage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 7：导出跟随筛选结果
+              const res = await purchaseApi.arrivals({ ...params, page: 1, pageSize: 50000 });
               exportCsv(
                 `到货核对_${today()}`,
                 [
@@ -37,15 +46,52 @@ export default function ArrivalPage() {
                   { title: '单价', key: 'price' },
                   { title: '到货状态', key: 'arrivalStatus' },
                 ],
-                list,
-              )
-            }
+                res.list ?? [],
+              );
+            }}
           >
             导出
           </Button>
         </Space>
       }
     >
+      {/* 需求 7：日期区间（下单日期）+ 供应商 + 物料包含字筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', supplierId: '', materialKeyword: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="供应商"
+          value={params.supplierId || undefined}
+          onChange={(v) => patchParams({ supplierId: v ?? '' })}
+          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="item_id"
         size="small"

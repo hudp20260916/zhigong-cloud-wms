@@ -24,7 +24,18 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
+import {
+  PermGate,
+  StatusTag,
+  PriceText,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  DetailTable,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import { summarize } from '@shared/enums';
@@ -65,8 +76,12 @@ export default function PurchaseOrderPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // 需求 5：点击行展开采购明细。按行 id 缓存，展开过的行不重复请求。
+  const detail = useRowDetail((id: number) => purchaseApi.orderDetail(id));
+
   const [materials, setMaterials] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<OrderRow | null>(null);
   const [mode, setMode] = useState<'bom' | 'direct'>('direct');
@@ -85,6 +100,7 @@ export default function PurchaseOrderPage() {
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
+    archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
   }, []);
 
   // 从库存页「去采购」跳转过来时自动带出物料
@@ -260,7 +276,10 @@ export default function PurchaseOrderPage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 5：导出跟随筛选结果 —— 带同样的筛选条件再请求一次并放大 pageSize，
+              // 否则导出的只是当前这一页。
+              const res = await purchaseApi.orders({ ...params, page: 1, pageSize: 50000 });
               exportCsv(
                 `采购订单_${today()}`,
                 [
@@ -273,9 +292,9 @@ export default function PurchaseOrderPage() {
                   { title: '制单人', key: 'creator_name' },
                   { title: '状态', key: 'status' },
                 ],
-                list,
-              )
-            }
+                res.list ?? [],
+              );
+            }}
           >
             导出
           </Button>
@@ -285,12 +304,81 @@ export default function PurchaseOrderPage() {
         </Space>
       }
     >
+      {/* 需求 5：供应商 + 物料包含字筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', status: '', supplierId: '', materialKeyword: '' })
+        }
+      >
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 200 }}
+          placeholder="供应商"
+          value={params.supplierId || undefined}
+          onChange={(v) => patchParams({ supplierId: v ?? '' })}
+          options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 200 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+        <Select
+          allowClear
+          style={{ width: 130 }}
+          placeholder="订单状态"
+          value={params.status || undefined}
+          onChange={(v) => patchParams({ status: v ?? '' })}
+          options={[
+            { value: '进行中', label: '进行中' },
+            { value: '已到齐', label: '已到齐' },
+            { value: '部分到货', label: '部分到货' },
+            { value: '未到货', label: '未到货' },
+            { value: '已关闭', label: '已关闭' },
+          ]}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
         loading={loading}
         dataSource={list}
         scroll={{ x: 1400 }}
+        // 需求 5：点击行展开该订单的采购明细
+        expandable={{
+          expandedRowRender: (r) => (
+            <DetailTable
+              loading={detail.loading[r.id]}
+              items={detail.cache[r.id]?.items ?? []}
+              emptyText={r.isParent ? '汇总父单本身不含明细，请查看拆分后的子单' : '该订单没有明细'}
+              columns={[
+                { title: '物料编码', dataIndex: 'code', width: 130 },
+                { title: '物料名称', dataIndex: 'name', width: 180 },
+                { title: '规格', dataIndex: 'spec', width: 150 },
+                { title: '单位', dataIndex: 'unit', width: 70 },
+                { title: '采购数量', dataIndex: 'qty', width: 100, className: 'mono' },
+                { title: '单价', dataIndex: 'price', width: 100, render: (v) => <PriceText value={v} /> },
+                {
+                  title: '金额',
+                  width: 110,
+                  className: 'mono',
+                  render: (_v, it) => (
+                    <PriceText value={Number(it.qty ?? 0) * Number(it.price ?? 0)} />
+                  ),
+                },
+                { title: '备注', dataIndex: 'remark' },
+              ]}
+            />
+          ),
+          onExpand: (expanded, r) => {
+            if (expanded) void detail.load(r.id);
+          },
+        }}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,

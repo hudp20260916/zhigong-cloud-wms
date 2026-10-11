@@ -10,7 +10,12 @@ export interface PageParams {
 
 export function parsePage(req: Request): PageParams {
   const page = Math.max(1, Number(req.query.page ?? 1) || 1);
-  const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize ?? 20) || 20));
+  /**
+   * 上限 50000 而不是 200：B 组需求要求「导出时只导出筛选结果」，
+   * 前端导出会带同样的筛选条件再请求一次并传一个大 pageSize，
+   * 否则只能导出当前页的 20 条。列表默认仍取 20，只有显式传大值才会放大。
+   */
+  const pageSize = Math.min(50000, Math.max(1, Number(req.query.pageSize ?? 20) || 20));
   return {
     page,
     pageSize,

@@ -18,9 +18,31 @@ purchaseArrivalRouter.get('/', requirePerm('purchase.arrival.view'), (req, res) 
 
   const cond: string[] = ["o.status <> '已撤销'"];
   const params: any[] = [];
+  // 需求 7：按日期区间（下单日期）、供应商、物料名称/编码包含字筛选
+  const supplierId = Number(req.query.supplierId ?? 0) || 0;
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
   if (keyword) {
     cond.push(`(IFNULL(p.name,'') LIKE ? OR IFNULL(m.name,'') LIKE ? OR IFNULL(o.order_no,'') LIKE ?)`);
     params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+  if (supplierId) {
+    cond.push('o.supplier_id = ?');
+    params.push(supplierId);
+  }
+  if (dateFrom) {
+    cond.push('o.order_date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    cond.push('o.order_date <= ?');
+    params.push(dateTo);
+  }
+  if (materialKeyword) {
+    cond.push('(m.name LIKE ? OR m.code LIKE ?)');
+    params.push(`%${materialKeyword}%`, `%${materialKeyword}%`);
   }
 
   const rows = db

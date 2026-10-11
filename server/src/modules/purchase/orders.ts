@@ -52,10 +52,15 @@ const createSchema = z.object({
 purchaseOrderRouter.get('/', requirePerm('purchase.order.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
   const status = String(req.query.status ?? '').trim();
+  // 需求 5：供应商下拉筛选 + 物料名称/编码包含字筛选
+  const supplierId = Number(req.query.supplierId ?? 0) || 0;
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
 
   const bind: any = { limit: pageSize, offset };
   if (keyword) bind.kw = `%${keyword}%`;
   if (status) bind.status = status;
+  if (supplierId) bind.supplierId = supplierId;
+  if (materialKeyword) bind.mkw = `%${materialKeyword}%`;
 
   const cond: string[] = ['1=1'];
   if (keyword) {
@@ -100,6 +105,38 @@ purchaseOrderRouter.get('/', requirePerm('purchase.order.view'), (req, res) => {
   }
   if (status) {
     cond.push('o.status = @status');
+  }
+  if (supplierId) {
+    cond.push('o.supplier_id = @supplierId');
+  }
+  if (materialKeyword) {
+    // 与 keyword 同一套思路：先一次性查出命中的物料 id，再用 EXISTS + IN 直连，
+    // 避免写成相关子查询让每行订单都扫一遍明细表。
+    const hits = db
+      .prepare(`SELECT id FROM materials WHERE name LIKE @mkw OR code LIKE @mkw`)
+      .all({ mkw: bind.mkw }) as { id: number }[];
+
+    if (hits.length === 0) {
+      // 一个物料都没命中，结果必然为空，直接短路
+      cond.push('1=0');
+    } else if (hits.length <= 1000) {
+      const names = hits.map((m, i) => {
+        const n = `mm${i}`;
+        bind[n] = m.id;
+        return `@${n}`;
+      });
+      cond.push(
+        `EXISTS (SELECT 1 FROM purchase_order_items oi
+                  WHERE oi.order_id = o.id AND oi.material_id IN (${names.join(',')}))`,
+      );
+    } else {
+      cond.push(
+        `EXISTS (SELECT 1 FROM purchase_order_items oi
+                  WHERE oi.order_id = o.id
+                    AND oi.material_id IN (SELECT id FROM materials
+                                            WHERE name LIKE @mkw OR code LIKE @mkw))`,
+      );
+    }
   }
 
   const rows = db
