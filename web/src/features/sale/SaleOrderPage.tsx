@@ -13,6 +13,7 @@ import {
   DockAction,
   CopyableCode,
   DetailTable,
+  FilterBar,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -71,13 +72,17 @@ export default function SaleOrderPage() {
       extra={
         <Space>
           <Input.Search placeholder="单号 / 客户" allowClear style={{ width: 220 }} onSearch={(keyword) => patchParams({ keyword })} />
-          <Button onClick={() => exportCsv(`销售开单_${today()}`, [
-            { title: '销售单号', key: 'order_no' },
-            { title: '开单日期', key: 'order_date' },
-            { title: '客户', key: 'customer_name' },
-            { title: '金额', key: 'total_amount' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Button onClick={async () => {
+            // 需求 12：导出跟随筛选结果
+            const res = await saleApi.orders({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`销售开单_${today()}`, [
+              { title: '销售单号', key: 'order_no' },
+              { title: '开单日期', key: 'order_date' },
+              { title: '客户', key: 'customer_name' },
+              { title: '金额', key: 'total_amount' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="sale.order.create">
             <DockAction icon={<PlusOutlined />} onClick={() => {
                 setItems([]);
@@ -90,6 +95,29 @@ export default function SaleOrderPage() {
         </Space>
       }
     >
+      {/* 需求 12：单号（顶部搜索）+ 客户 + 产品名称筛选 */}
+      <FilterBar
+        onReset={() => patchParams({ keyword: '', customerId: '', productName: '' })}
+      >
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 200 }}
+          placeholder="客户"
+          value={params.customerId || undefined}
+          onChange={(v) => patchParams({ customerId: v ?? '' })}
+          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 200 }}
+          placeholder="产品名称 / 编码包含"
+          value={params.productName ?? ''}
+          onChange={(e) => patchParams({ productName: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

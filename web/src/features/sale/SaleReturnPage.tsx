@@ -4,7 +4,16 @@ import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -21,10 +30,12 @@ export default function SaleReturnPage() {
   const [returnDate, setReturnDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
 
   useEffect(() => {
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
     saleApi.orders({ pageSize: 200 }).then((r) => setOrders(r.list)).catch(() => undefined);
+    archiveApi.customers({ pageSize: 200 }).then((r) => setCustomers(r.list ?? [])).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -56,20 +67,67 @@ export default function SaleReturnPage() {
       title="销售退货"
       extra={
         <Space>
-          <Button onClick={() => exportCsv(`销售退货_${today()}`, [
-            { title: '退货单号', key: 'return_no' },
-            { title: '退货日期', key: 'return_date' },
-            { title: '关联销售单', key: 'order_no' },
-            { title: '客户', key: 'customer_name' },
-            { title: '金额', key: 'total_amount' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Input.Search
+            placeholder="退货单号 / 销售单号 / 客户"
+            allowClear
+            style={{ width: 240 }}
+            onSearch={(keyword) => patchParams({ keyword })}
+          />
+          <Button onClick={async () => {
+            // 需求 15：导出跟随筛选结果
+            const res = await saleApi.returns({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`销售退货_${today()}`, [
+              { title: '退货单号', key: 'return_no' },
+              { title: '退货日期', key: 'return_date' },
+              { title: '关联销售单', key: 'order_no' },
+              { title: '客户', key: 'customer_name' },
+              { title: '金额', key: 'total_amount' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="sale.return.create">
             <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setOrderId(undefined); setReturnDate(today()); setRemark(''); setOpen(true); }}>新增退货</DockAction>
           </PermGate>
         </Space>
       }
     >
+      {/* 需求 15：单号（顶部搜索）+ 日期区间 + 客户 + 产品名称筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', customerId: '', productName: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="客户"
+          value={params.customerId || undefined}
+          onChange={(v) => patchParams({ customerId: v ?? '' })}
+          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="产品名称 / 编码包含"
+          value={params.productName ?? ''}
+          onChange={(e) => patchParams({ productName: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

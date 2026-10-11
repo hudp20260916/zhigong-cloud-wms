@@ -31,8 +31,25 @@ const orderSchema = z.object({
 
 saleRouter.get('/orders', requirePerm('sale.order.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const where = keyword ? `(o.order_no LIKE @kw OR IFNULL(c.name,'') LIKE @kw)` : '1=1';
-  const params = keyword ? { kw: `%${keyword}%`, limit: pageSize, offset } : { limit: pageSize, offset };
+  // 需求 12：按单号（keyword）、客户、产品名称筛选
+  const customerId = Number(req.query.customerId ?? 0) || 0;
+  const productName = String(req.query.productName ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (customerId) bind.customerId = customerId;
+  if (productName) bind.pn = `%${productName}%`;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) cond.push(`(o.order_no LIKE @kw OR IFNULL(c.name,'') LIKE @kw)`);
+  if (customerId) cond.push('o.customer_id = @customerId');
+  if (productName) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM sale_order_items i JOIN products p ON p.id = i.product_id
+                WHERE i.order_id = o.id AND (p.name LIKE @pn OR p.code LIKE @pn))`,
+    );
+  }
+  const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
@@ -43,12 +60,20 @@ saleRouter.get('/orders', requirePerm('sale.order.view'), (req, res) => {
          LEFT JOIN users u ON u.id = o.created_by
         WHERE ${where} ORDER BY o.id DESC LIMIT @limit OFFSET @offset`,
     )
-    .all(params) as any[];
+    .all(bind) as any[];
 
+  // countRows 走位置参数：按占位符在 SQL 中出现的先后顺序入参，避免个数对不上
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
   const total = countRows(
     `sale_orders o LEFT JOIN customers c ON c.id = o.customer_id`,
-    keyword ? `(o.order_no LIKE ? OR IFNULL(c.name,'') LIKE ?)` : '1=1',
-    keyword ? [`%${keyword}%`, `%${keyword}%`] : [],
+    totalCond.join(' AND '),
+    totalParams,
   );
 
   const ctx = req.ctx!;
@@ -126,8 +151,31 @@ saleRouter.get('/orders/:id', requirePerm('sale.order.view'), (req, res) => {
 
 saleRouter.get('/deliveries', requirePerm('sale.delivery.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const where = keyword ? `(d.delivery_no LIKE @kw OR IFNULL(o.order_no,'') LIKE @kw)` : '1=1';
-  const params = keyword ? { kw: `%${keyword}%`, limit: pageSize, offset } : { limit: pageSize, offset };
+  // 需求 14：按单号（keyword）、日期区间、客户、产品名称筛选
+  const customerId = Number(req.query.customerId ?? 0) || 0;
+  const productName = String(req.query.productName ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (customerId) bind.customerId = customerId;
+  if (productName) bind.pn = `%${productName}%`;
+  if (dateFrom) bind.df = dateFrom;
+  if (dateTo) bind.dt = dateTo;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) cond.push(`(d.delivery_no LIKE @kw OR IFNULL(o.order_no,'') LIKE @kw)`);
+  if (customerId) cond.push('d.customer_id = @customerId');
+  if (dateFrom) cond.push('d.delivery_date >= @df');
+  if (dateTo) cond.push('d.delivery_date <= @dt');
+  if (productName) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM sale_delivery_items i JOIN products p ON p.id = i.product_id
+                WHERE i.delivery_id = d.id AND (p.name LIKE @pn OR p.code LIKE @pn))`,
+    );
+  }
+  const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
@@ -138,12 +186,19 @@ saleRouter.get('/deliveries', requirePerm('sale.delivery.view'), (req, res) => {
          LEFT JOIN users u ON u.id = d.operator_id
         WHERE ${where} ORDER BY d.id DESC LIMIT @limit OFFSET @offset`,
     )
-    .all(params) as any[];
+    .all(bind) as any[];
 
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
   const total = countRows(
     `sale_deliveries d LEFT JOIN sale_orders o ON o.id = d.order_id`,
-    keyword ? `(d.delivery_no LIKE ? OR IFNULL(o.order_no,'') LIKE ?)` : '1=1',
-    keyword ? [`%${keyword}%`, `%${keyword}%`] : [],
+    totalCond.join(' AND '),
+    totalParams,
   );
 
   const ctx = req.ctx!;
@@ -300,7 +355,37 @@ saleRouter.post('/deliveries/:id/undo', requirePerm('sale.delivery.create'), (re
 // ---------------- 销售退货 ----------------
 
 saleRouter.get('/returns', requirePerm('sale.return.view'), (req, res) => {
-  const { page, pageSize, offset } = parsePage(req);
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  // 需求 15：按单号（含关联销售单）、日期区间、客户、产品名称筛选
+  const customerId = Number(req.query.customerId ?? 0) || 0;
+  const productName = String(req.query.productName ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (customerId) bind.customerId = customerId;
+  if (productName) bind.pn = `%${productName}%`;
+  if (dateFrom) bind.df = dateFrom;
+  if (dateTo) bind.dt = dateTo;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) {
+    cond.push(
+      `(r.return_no LIKE @kw OR IFNULL(o.order_no,'') LIKE @kw OR IFNULL(c.name,'') LIKE @kw)`,
+    );
+  }
+  if (customerId) cond.push('r.customer_id = @customerId');
+  if (dateFrom) cond.push('r.return_date >= @df');
+  if (dateTo) cond.push('r.return_date <= @dt');
+  if (productName) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM sale_return_items i JOIN products p ON p.id = i.product_id
+                WHERE i.return_id = r.id AND (p.name LIKE @pn OR p.code LIKE @pn))`,
+    );
+  }
+  const where = cond.join(' AND ');
+
   const rows = db
     .prepare(
       `SELECT r.*, o.order_no, c.name AS customer_name, u.display_name AS operator_name
@@ -308,9 +393,25 @@ saleRouter.get('/returns', requirePerm('sale.return.view'), (req, res) => {
          LEFT JOIN sale_orders o ON o.id = r.order_id
          LEFT JOIN customers c ON c.id = r.customer_id
          LEFT JOIN users u ON u.id = r.operator_id
-        ORDER BY r.id DESC LIMIT ? OFFSET ?`,
+        WHERE ${where} ORDER BY r.id DESC LIMIT @limit OFFSET @offset`,
     )
-    .all(pageSize, offset) as any[];
+    .all(bind) as any[];
+
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
+  const total = countRows(
+    `sale_returns r
+      LEFT JOIN sale_orders o ON o.id = r.order_id
+      LEFT JOIN customers c ON c.id = r.customer_id`,
+    totalCond.join(' AND '),
+    totalParams,
+  );
+
   const ctx = req.ctx!;
   okList(
     res,
@@ -318,7 +419,7 @@ saleRouter.get('/returns', requirePerm('sale.return.view'), (req, res) => {
       ...r,
       canUndo: ctx.permissions.includes('sale.return.create') && r.status === DOC_STATUS.VALID,
     })),
-    countRows('sale_returns'),
+    total,
   );
 });
 

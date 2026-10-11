@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Alert, Button, Card, DatePicker, Input, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { saleApi } from '../../api';
+import { archiveApi, saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
   PermGate,
@@ -13,6 +13,7 @@ import {
   DockAction,
   CopyableCode,
   DetailTable,
+  FilterBar,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -29,12 +30,14 @@ export default function SaleDeliveryPage() {
   const [orderId, setOrderId] = useState<number | undefined>();
   const [deliveryDate, setDeliveryDate] = useState(today());
   const [remark, setRemark] = useState('');
+  const [customers, setCustomers] = useState<any[]>([]);
 
   useEffect(() => {
     saleApi
       .orders({ pageSize: 200 })
       .then((r) => setOrders(r.list.filter((o: any) => o.status === '待出库')))
       .catch(() => undefined);
+    archiveApi.customers({ pageSize: 200 }).then((r) => setCustomers(r.list ?? [])).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -65,14 +68,18 @@ export default function SaleDeliveryPage() {
       extra={
         <Space>
           <Input.Search placeholder="单号" allowClear style={{ width: 200 }} onSearch={(keyword) => patchParams({ keyword })} />
-          <Button onClick={() => exportCsv(`销售出库_${today()}`, [
-            { title: '出库单号', key: 'delivery_no' },
-            { title: '出库日期', key: 'delivery_date' },
-            { title: '关联销售单', key: 'order_no' },
-            { title: '客户', key: 'customer_name' },
-            { title: '金额', key: 'total_amount' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Button onClick={async () => {
+            // 需求 14：导出跟随筛选结果
+            const res = await saleApi.deliveries({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`销售出库_${today()}`, [
+              { title: '出库单号', key: 'delivery_no' },
+              { title: '出库日期', key: 'delivery_date' },
+              { title: '关联销售单', key: 'order_no' },
+              { title: '客户', key: 'customer_name' },
+              { title: '金额', key: 'total_amount' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="sale.delivery.create">
             <DockAction icon={<PlusOutlined />} onClick={() => { setOrderId(undefined); setDeliveryDate(today()); setRemark(''); setOpen(true); }}>一键出库</DockAction>
           </PermGate>
@@ -80,6 +87,44 @@ export default function SaleDeliveryPage() {
       }
     >
       <Alert type="info" showIcon style={{ marginBottom: 12 }} message="出库扣减成品库存并禁止负库存；撤销出库将回补库存并把销售单恢复为待出库" />
+
+      {/* 需求 14：单号（顶部搜索）+ 日期区间 + 客户 + 产品名称筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', customerId: '', productName: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="客户"
+          value={params.customerId || undefined}
+          onChange={(v) => patchParams({ customerId: v ?? '' })}
+          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="产品名称 / 编码包含"
+          value={params.productName ?? ''}
+          onChange={(e) => patchParams({ productName: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
