@@ -18,8 +18,17 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
+import { dayVal } from '../../utils/date';
 
 export default function WorkOrderPage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) =>
@@ -105,18 +114,22 @@ export default function WorkOrderPage() {
           />
           <Button
             onClick={() =>
-              exportCsv(`生产工单_${today()}`, [
-                { title: '工单编号', key: 'wo_no' },
-                { title: '主产品', key: 'product_name' },
-                { title: '计划产量', key: 'plan_qty' },
-                { title: 'BOM版本', key: 'bom_version' },
-                { title: '计划开工', key: 'plan_start' },
-                { title: '计划完工', key: 'plan_end' },
-                { title: '实际领料合计', key: 'issued_qty' },
-                { title: '实际入库合计', key: 'received_qty' },
-                { title: '损耗', key: 'loss_qty' },
-                { title: '状态', key: 'status' },
-              ], list)
+              void (async () => {
+                // 需求 9：导出跟随筛选结果
+                const res = await productionApi.workOrders({ ...params, page: 1, pageSize: 50000 });
+                exportCsv(`生产工单_${today()}`, [
+                  { title: '工单编号', key: 'wo_no' },
+                  { title: '主产品', key: 'product_name' },
+                  { title: '计划产量', key: 'plan_qty' },
+                  { title: 'BOM版本', key: 'bom_version' },
+                  { title: '计划开工', key: 'plan_start' },
+                  { title: '计划完工', key: 'plan_end' },
+                  { title: '实际领料合计', key: 'issued_qty' },
+                  { title: '实际入库合计', key: 'received_qty' },
+                  { title: '损耗', key: 'loss_qty' },
+                  { title: '状态', key: 'status' },
+                ], res.list ?? []);
+              })()
             }
           >
             导出
@@ -127,6 +140,38 @@ export default function WorkOrderPage() {
         </Space>
       }
     >
+      {/* 需求 9：日期区间 + 完工状态 + 包含字筛选 */}
+      <FilterBar
+        onReset={() =>
+          patchParams({ keyword: '', statusFilter: '', dateFrom: '', dateTo: '' })
+        }
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          style={{ width: 150 }}
+          placeholder="完工状态"
+          value={params.statusFilter || undefined}
+          onChange={(v) => patchParams({ statusFilter: v ?? '' })}
+          options={[
+            { value: 'producing', label: '生产中' },
+            { value: 'unfinished', label: '未完工' },
+            { value: 'finished', label: '已完工' },
+          ]}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

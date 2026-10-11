@@ -1,4 +1,4 @@
-import { api, getToken, API_BASE, type ListResult } from './client';
+import { api, downloadFile, getToken, API_BASE, type ListResult } from './client';
 
 export interface UserInfo {
   id: number;
@@ -52,6 +52,8 @@ export const inventoryApi = {
   products: (p?: any) => api.get<ListResult<any>>('/inventory/products', p),
   detail: (p: any) => api.get<any>('/inventory/detail', p),
   initial: (items: any[]) => api.post<any>('/inventory/initial', { items }),
+  // 需求 20：期初库存列表（只读，用于筛选 / 导出）
+  initialList: (p?: any) => api.get<ListResult<any>>('/inventory/initial', p),
   ledger: (p?: any) => api.get<ListResult<any>>('/inventory/ledger', p),
 };
 
@@ -153,6 +155,13 @@ export const financeApi = {
 export const reportApi = {
   meta: () => api.get<any[]>('/reports/meta'),
   data: (p: any) => api.get<{ columns: any[]; rows: any[]; meta: any }>('/reports/data', p),
+};
+
+export const backupApi = {
+  // 需求 30：备份所有模块数据
+  tables: () => api.get<any>('/system/backup/tables'),
+  exportAll: () => api.get<any>('/system/backup/export'),
+  downloadDb: () => downloadFile('/system/backup/db', `数据备份.db`),
 };
 
 export const printApi = {

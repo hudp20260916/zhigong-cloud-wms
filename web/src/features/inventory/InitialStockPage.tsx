@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, InputNumber, Select, Space, Table, Tabs, message } from 'antd';
+import { Button, Card, Divider, Input, InputNumber, Select, Space, Tabs, message } from 'antd';
 import { archiveApi, inventoryApi } from '../../api';
-import { PermPage, ResponsiveTable } from '../../components';
+import { useList } from '../../hooks/useList';
+import {
+  PermPage,
+  PriceText,
+  ResponsiveTable,
+  ImportExcelModal,
+  FilterBar,
+  CopyableCode,
+} from '../../components';
+import { exportCsv, today } from '../../utils/exportCsv';
 import type { ItemType } from '@shared/enums';
 
 interface Row {
@@ -15,12 +24,29 @@ interface Row {
   price: number;
 }
 
+/**
+ * 需求 20：期初库存（子物料 / 主产品）支持筛选、导出、Excel 导入与模板下载。
+ *
+ * 页面拆成两块：
+ *  1. 上半部分是「已录期初清单」——只读，来源于流水台账的期初合计，支持按编码/名称/规格筛选与导出；
+ *  2. 下半部分是原来的「录入 / 修改」区，保留手动逐条设定的能力。
+ * 两者共用同一个 setInitialStock 语义（设定，非累加），不会打架。
+ */
 export default function InitialStockPage() {
   const [tab, setTab] = useState<ItemType>('material');
+  const { list, total, loading, params, patchParams, reload } = useList<any>((p) =>
+    inventoryApi.initialList({ ...p, itemType: tab }),
+  );
   const [options, setOptions] = useState<any[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [pickId, setPickId] = useState<number | undefined>();
   const [saving, setSaving] = useState(false);
+
+  // 切换 Tab 时刷新已录清单
+  useEffect(() => {
+    patchParams({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   useEffect(() => {
     (tab === 'material' ? archiveApi.materialOptions() : archiveApi.productOptions())
@@ -64,6 +90,7 @@ export default function InitialStockPage() {
       );
       message.success(`已录入 ${rows.length} 条期初库存`);
       setRows([]);
+      reload();
     } catch (e: any) {
       message.error(e.message);
     } finally {
@@ -71,12 +98,40 @@ export default function InitialStockPage() {
     }
   }
 
+  const label = tab === 'material' ? '子物料' : '主产品';
+
   return (
     <PermPage permission="stock.initial.manage">
       <Card
-        title="期初库存录入"
+        title="期初库存"
         extra={
           <Space>
+            <Input.Search
+              placeholder="编码 / 名称 / 规格"
+              allowClear
+              style={{ width: 220 }}
+              onSearch={(keyword) => patchParams({ keyword })}
+            />
+            {/* 需求 20：导出跟随筛选结果 */}
+            <Button
+              onClick={async () => {
+                const res = await inventoryApi.initialList({ ...params, itemType: tab, page: 1, pageSize: 50000 });
+                exportCsv(`${label}期初库存_${today()}`, [
+                  { title: '编码', key: 'code' },
+                  { title: '名称', key: 'name' },
+                  { title: '规格', key: 'spec' },
+                  { title: '单位', key: 'unit' },
+                  { title: '期初数量', key: 'initial_qty' },
+                  ...(tab === 'material' ? [{ title: '期初单价', key: 'initial_price' }] : []),
+                  { title: '当前库存', key: 'current_stock' },
+                  { title: '最近更新', key: 'updated_at' },
+                ], res.list ?? []);
+              }}
+            >
+              导出
+            </Button>
+            {/* 需求 20：期初库存 Excel 导入（自带模板下载） */}
+            <ImportExcelModal kind="initial_stock" onSuccess={reload} />
             <Button type="primary" loading={saving} onClick={submit} disabled={rows.length === 0}>
               提交期初库存
             </Button>
@@ -91,6 +146,55 @@ export default function InitialStockPage() {
             { key: 'product', label: '主产品期初' },
           ]}
         />
+
+        <FilterBar onReset={() => patchParams({ keyword: '' })}>
+          <Input
+            allowClear
+            style={{ width: 240 }}
+            placeholder={`${label}编码 / 名称 / 规格包含`}
+            value={params.keyword ?? ''}
+            onChange={(e) => patchParams({ keyword: e.target.value })}
+          />
+        </FilterBar>
+
+        <ResponsiveTable
+          rowKey="item_id"
+          size="small"
+          loading={loading}
+          dataSource={list}
+          scroll={{ x: 900 }}
+          pagination={{
+            current: params.page,
+            pageSize: params.pageSize,
+            total,
+            onChange: (page, pageSize) => patchParams({ page, pageSize }),
+          }}
+          locale={{ emptyText: '尚未录入期初库存' }}
+          columns={[
+            { title: '编码', dataIndex: 'code', width: 130, render: (v) => <CopyableCode value={v} /> },
+            { title: '名称', dataIndex: 'name' },
+            { title: '规格', dataIndex: 'spec', width: 160, render: (v) => v || '-' },
+            { title: '单位', dataIndex: 'unit', width: 80 },
+            { title: '期初数量', dataIndex: 'initial_qty', width: 110, className: 'mono' },
+            ...(tab === 'material'
+              ? [
+                  {
+                    title: '期初单价',
+                    dataIndex: 'initial_price',
+                    width: 110,
+                    render: (v: any) => <PriceText value={v} />,
+                  },
+                ]
+              : []),
+            { title: '当前库存', dataIndex: 'current_stock', width: 110, className: 'mono' },
+            { title: '最近更新', dataIndex: 'updated_at', width: 170, render: (v) => String(v ?? '').slice(0, 19) || '-' },
+          ]}
+        />
+
+        <Divider orientation="left" plain style={{ marginTop: 20 }}>
+          录入 / 修改期初库存
+        </Divider>
+
         <Space style={{ marginBottom: 12 }}>
           <Select
             showSearch

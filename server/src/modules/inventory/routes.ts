@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { ItemType } from '../../../../shared/enums.js';
+import { BIZ_TYPE } from '../../../../shared/enums.js';
 import { db, nowIso, tx } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { stockSummary } from '../../core/ledger.js';
@@ -86,12 +87,18 @@ inventoryRouter.get('/detail', requirePerm('stock.detail.view'), (req, res) => {
   const direction = String(req.query.direction ?? '').trim();
   const from = String(req.query.from ?? '').trim();
   const to = String(req.query.to ?? '').trim();
+  // 需求 18/19：出入库详情按业务类型筛选
+  const bizType = String(req.query.bizType ?? '').trim();
 
   const cond: string[] = [`l.item_type = ?`, `l.item_id = ?`];
   const params: any[] = [itemType, itemId];
   if (direction === 'in' || direction === 'out') {
     cond.push(`l.direction = ?`);
     params.push(direction);
+  }
+  if (bizType) {
+    cond.push(`l.biz_type = ?`);
+    params.push(bizType);
   }
   if (from) {
     cond.push(`l.created_at >= ?`);
@@ -127,12 +134,37 @@ inventoryRouter.get('/detail/export', requirePerm('stock.detail.view'), (req, re
   if (!canExport(req.ctx!)) throw Err.forbidden('无数据导出权限');
   const itemType = String(req.query.itemType ?? 'material') as ItemType;
   const itemId = Number(req.query.itemId);
+  // 需求 18/19：导出与页面筛选保持一致，只导出当前筛选结果
+  const direction = String(req.query.direction ?? '').trim();
+  const from = String(req.query.from ?? '').trim();
+  const to = String(req.query.to ?? '').trim();
+  const bizType = String(req.query.bizType ?? '').trim();
+
+  const cond: string[] = [`l.item_type = ?`, `l.item_id = ?`];
+  const params: any[] = [itemType, itemId];
+  if (direction === 'in' || direction === 'out') {
+    cond.push(`l.direction = ?`);
+    params.push(direction);
+  }
+  if (bizType) {
+    cond.push(`l.biz_type = ?`);
+    params.push(bizType);
+  }
+  if (from) {
+    cond.push(`l.created_at >= ?`);
+    params.push(`${from}T00:00:00.000Z`);
+  }
+  if (to) {
+    cond.push(`l.created_at <= ?`);
+    params.push(`${to}T23:59:59.999Z`);
+  }
+
   const rows = db
     .prepare(
       `SELECT l.* FROM stock_ledger l
-        WHERE l.item_type = ? AND l.item_id = ? ORDER BY l.created_at DESC`,
+        WHERE ${cond.join(' AND ')} ORDER BY l.created_at DESC, l.id DESC`,
     )
-    .all(itemType, itemId) as any[];
+    .all(...params) as any[];
   const ctx = { canViewPrice: canViewPrice(req.ctx!) };
   ok(res, { list: maskList(rows, ctx) });
 });
@@ -174,17 +206,73 @@ inventoryRouter.post('/initial', requirePerm('stock.initial.manage'), (req, res)
   ok(res, { affected, at: nowIso() });
 });
 
+/**
+ * 需求 20：期初库存列表（只读）。
+ *
+ * 期初采用「设定」语义，最新值就是该对象在台账里 biz_type=期初库存 的有效流水合计，
+ * 所以这里直接聚合流水，不需要额外的期初表，也不会与 current_stock 出现两套口径。
+ */
+inventoryRouter.get('/initial', requirePerm('stock.initial.manage'), (req, res) => {
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  const itemType = String(req.query.itemType ?? 'material').trim() === 'product' ? 'product' : 'material';
+  const { table, label } = ITEM_SQL[itemType as ItemType];
+
+  const cond: string[] = ['l.item_type = ?', 'l.biz_type = ?', "l.status = '有效'", 'l.is_reversal = 0'];
+  const params: any[] = [itemType, BIZ_TYPE.INITIAL];
+  if (keyword) {
+    cond.push(`(t.code LIKE ? OR t.name LIKE ? OR IFNULL(t.spec,'') LIKE ?)`);
+    params.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+  }
+  const where = cond.join(' AND ');
+
+  const rows = db
+    .prepare(
+      `SELECT t.id AS item_id, t.code, t.name, t.spec, t.unit, t.current_stock,
+              SUM(CASE WHEN l.direction = 'in' THEN l.qty ELSE -l.qty END) AS initial_qty,
+              MAX(l.unit_price) AS initial_price,
+              MAX(l.created_at) AS updated_at
+         FROM ${table} t
+         JOIN stock_ledger l ON l.item_type = ? AND l.item_id = t.id
+        WHERE ${where}
+        GROUP BY t.id
+        ORDER BY t.code
+        LIMIT ? OFFSET ?`,
+    )
+    .all(itemType, ...params, pageSize, offset) as any[];
+
+  const totalRow = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM (
+         SELECT t.id FROM ${table} t
+           JOIN stock_ledger l ON l.item_type = ? AND l.item_id = t.id
+          WHERE ${where} GROUP BY t.id)`,
+    )
+    .get(itemType, ...params) as { c: number };
+
+  okList(
+    res,
+    rows.map((r: any) => ({ ...r, itemType, itemLabel: label })),
+    totalRow.c,
+  );
+});
+
 /** 库存流水台账（只读，不含入库单号） */
 inventoryRouter.get('/ledger', requirePerm('stock.view'), (req, res) => {
   const { page, pageSize, offset } = parsePage(req);
   const itemType = String(req.query.itemType ?? '').trim();
   const bizType = String(req.query.bizType ?? '').trim();
+  // 需求 21：流水台账按方向（入库 / 出库）筛选
+  const direction = String(req.query.direction ?? '').trim();
 
   const cond: string[] = ['1=1'];
   const params: any[] = [];
   if (itemType) {
     cond.push('l.item_type = ?');
     params.push(itemType);
+  }
+  if (direction === 'in' || direction === 'out') {
+    cond.push('l.direction = ?');
+    params.push(direction);
   }
   if (bizType) {
     cond.push('l.biz_type = ?');

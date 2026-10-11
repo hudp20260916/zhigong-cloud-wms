@@ -1,6 +1,14 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db, nowIso } from '../../db/index.js';
+import {
+  CODE_KINDS,
+  CODE_KIND_LABELS,
+  DEFAULT_PREFIXES,
+  previewCode,
+  prefixSettingKey,
+  type CodeKind,
+} from '../../core/code.js';
 import { Err } from '../../core/errors.js';
 import { writeLog } from '../../core/log.js';
 import { requirePerm, requireAuth } from '../../middleware/auth.js';
@@ -23,6 +31,8 @@ export interface SettingDef {
   max?: number;
   suffix?: string;
   hint: string;
+  /** 未配置时的默认值，前端用作 placeholder */
+  default?: string;
 }
 
 export const SETTING_DEFS: SettingDef[] = [
@@ -85,6 +95,25 @@ export const SETTING_DEFS: SettingDef[] = [
     type: 'text',
     hint: '用于打印模板。',
   },
+  // 需求 29：所有单据的单号前缀可自行设定，后缀序号自动递增
+  {
+    key: 'code.seqWidth',
+    label: '单号序号位数',
+    group: '单据编号',
+    type: 'number',
+    min: 3,
+    max: 8,
+    suffix: '位',
+    hint: '单号末尾流水号的位数，不足补零，默认 4 位（如 0001）。序号由系统自动递增，不随日期或初始化清零。',
+  },
+  ...CODE_KINDS.map((kind) => ({
+    key: prefixSettingKey(kind),
+    label: `${CODE_KIND_LABELS[kind]}前缀`,
+    group: '单据编号',
+    type: 'text' as const,
+    default: DEFAULT_PREFIXES[kind],
+    hint: `默认 ${DEFAULT_PREFIXES[kind]}。仅允许字母、数字、- 和 _；修改前缀不会重置序号。`,
+  })),
 ];
 
 function defOf(key: string): SettingDef {
@@ -113,7 +142,14 @@ export function alertConfig() {
 settingsRouter.get('/', requireAuth, (_req, res) => {
   ok(
     res,
-    SETTING_DEFS.map((d) => ({ ...d, value: valueOf(d.key) })),
+    SETTING_DEFS.map((d) => ({
+      ...d,
+      value: valueOf(d.key),
+      // 需求 29：单据编号组顺带告诉前端「下一张单号长什么样」，便于预览
+      preview: d.group === '单据编号' && d.key.startsWith('code.prefix.')
+        ? previewCode(d.key.slice('code.prefix.'.length) as CodeKind)
+        : undefined,
+    })),
   );
 });
 
@@ -133,6 +169,13 @@ settingsRouter.put('/', requirePerm('system.init.execute'), (req, res) => {
       if (!Number.isFinite(n)) throw Err.badRequest(`「${def.label}」必须是数字`);
       if (def.min !== undefined && n < def.min) throw Err.badRequest(`「${def.label}」不能小于 ${def.min}`);
       if (def.max !== undefined && n > def.max) throw Err.badRequest(`「${def.label}」不能大于 ${def.max}`);
+    }
+    // 需求 29：单号前缀校验。空值等于回退默认前缀是允许的，但填了就必须合法
+    if (def.key.startsWith('code.prefix.')) {
+      const v = it.value.trim();
+      if (v && !/^[A-Za-z0-9_-]+$/.test(v)) {
+        throw Err.badRequest(`「${def.label}」只能包含字母、数字、- 和 _`);
+      }
     }
   }
 

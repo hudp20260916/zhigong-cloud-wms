@@ -4,7 +4,16 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -63,42 +72,88 @@ export default function MaterialSalePage() {
       title="物料销售"
       extra={
         <Space>
-          <Button onClick={() => exportCsv(`物料销售_${today()}`, [
-            { title: '销售单号', key: 'sale_no' },
-            { title: '销售日期', key: 'sale_date' },
-            { title: '销售内容', key: 'content' },
-            { title: '金额', key: 'total_amount' },
-            { title: '操作人', key: 'operator_name' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Input.Search placeholder="销售单号" allowClear style={{ width: 190 }} onSearch={(keyword) => patchParams({ keyword })} />
+          {/* 需求 25：导出跟随筛选结果 */}
+          <Button onClick={async () => {
+            const res = await warehouseApi.materialSales({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`物料销售_${today()}`, [
+              { title: '销售单号', key: 'sale_no' },
+              { title: '销售日期', key: 'sale_date' },
+              { title: '客户', key: 'customer_name' },
+              { title: '销售内容', key: 'content' },
+              { title: '金额', key: 'total_amount' },
+              { title: '操作人', key: 'operator_name' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="warehouse.materialSale.create">
             <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setCustomerId(undefined); setSaleDate(today()); setRemark(''); setOpen(true); }}>新增物料销售</DockAction>
           </PermGate>
         </Space>
       }
     >
+      {/* 需求 25：日期区间 + 客户 + 物料名称/编码包含字筛选 */}
+      <FilterBar onReset={() => patchParams({ customerId: '', materialKeyword: '', dateFrom: '', dateTo: '' })}>
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          style={{ width: 180 }}
+          placeholder="客户"
+          value={params.customerId || undefined}
+          onChange={(v) => patchParams({ customerId: v ?? '' })}
+          options={customers.map((c) => ({ value: c.id, label: c.name }))}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
         loading={loading}
         dataSource={list}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1200 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
           { title: '销售单号', dataIndex: 'sale_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '销售日期', dataIndex: 'sale_date', width: 110 },
+          { title: '客户', dataIndex: 'customer_name', width: 180, render: (v) => v || '-' },
           { title: '销售内容', dataIndex: 'content', ellipsis: true },
           { title: '金额', dataIndex: 'total_amount', width: 120, render: (v) => <PriceText value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          { title: '操作', width: 90, render: (_, r) => r.canUndo ? (
-            <Popconfirm title="确认撤销？" onConfirm={async () => {
-              try { await warehouseApi.undoMaterialSale(r.id); message.success('已撤销'); reload(); }
-              catch (e: any) { message.error(e.message); }
-            }}>
-              <Button type="link" size="small" danger>撤销</Button>
-            </Popconfirm>
-          ) : '-' },
+          { title: '操作', width: 160, render: (_, r) => (
+            <Space size={0}>
+              {/* 需求 25：物料销售打印模板 */}
+              <PrintButton docType="material_sale" id={r.id} />
+              {r.canUndo ? (
+                <Popconfirm title="确认撤销？" onConfirm={async () => {
+                  try { await warehouseApi.undoMaterialSale(r.id); message.success('已撤销'); reload(); }
+                  catch (e: any) { message.error(e.message); }
+                }}>
+                  <Button type="link" size="small" danger>撤销</Button>
+                </Popconfirm>
+              ) : null}
+            </Space>
+          ) },
         ]}
       />
 

@@ -24,7 +24,18 @@ export const productReceiptRouter = Router();
 /** 已领料工单入库时是否扣减外箱耗材（需求「按配置」——此处为系统配置项，默认开启） */
 const DEDUCT_CARTON_ON_ISSUED = true;
 
-const RECEIPT_TYPES = ['生产入库（已领料）', '售后返修入库', '成品入库（直接扣料）'] as const;
+/**
+ * 四种入库类型。
+ * 「直接入库（不扣料）」是需求 11 新增的：只增加成品库存，不校验也不扣减任何子物料。
+ * 适用于盘盈补录、外购成品入库等本来就没有领料动作的场景 ——
+ * 这类入库如果走「直接扣料」会把物料库存凭空扣掉，账实对不上。
+ */
+const RECEIPT_TYPES = [
+  '生产入库（已领料）',
+  '售后返修入库',
+  '成品入库（直接扣料）',
+  '直接入库（不扣料）',
+] as const;
 
 const schema = z.object({
   receiptType: z.enum(RECEIPT_TYPES),
@@ -39,10 +50,21 @@ const schema = z.object({
 
 productReceiptRouter.get('/', requirePerm('production.receipt.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const where = keyword
-    ? `(IFNULL(w.wo_no,'') LIKE @kw OR EXISTS (SELECT 1 FROM product_receipt_items ri JOIN products p2 ON p2.id = ri.product_id WHERE ri.receipt_id = r.id AND p2.name LIKE @kw))`
-    : '1=1';
-  const params = keyword ? { kw: `%${keyword}%`, limit: pageSize, offset } : { limit: pageSize, offset };
+  // 需求 11：按入库类型 + 包含字筛选（包含字已覆盖工单号与成品名称）
+  const receiptType = String(req.query.receiptType ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (receiptType) bind.rt = receiptType;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) {
+    cond.push(
+      `(IFNULL(w.wo_no,'') LIKE @kw OR EXISTS (SELECT 1 FROM product_receipt_items ri JOIN products p2 ON p2.id = ri.product_id WHERE ri.receipt_id = r.id AND p2.name LIKE @kw))`,
+    );
+  }
+  if (receiptType) cond.push('r.receipt_type = @rt');
+  const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
@@ -60,15 +82,20 @@ productReceiptRouter.get('/', requirePerm('production.receipt.view'), (req, res)
         ORDER BY r.id DESC
         LIMIT @limit OFFSET @offset`,
     )
-    .all(params) as any[];
+    .all(bind) as any[];
 
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
   const total = countRows(
     `product_receipts r
       LEFT JOIN work_orders w ON w.id = r.wo_id`,
-    keyword
-      ? `(IFNULL(w.wo_no,'') LIKE ? OR EXISTS (SELECT 1 FROM product_receipt_items ri JOIN products p2 ON p2.id = ri.product_id WHERE ri.receipt_id = r.id AND p2.name LIKE ?))`
-      : '1=1',
-    keyword ? [`%${keyword}%`, `%${keyword}%`] : [],
+    totalCond.join(' AND '),
+    totalParams,
   );
 
   const ctx = req.ctx!;
@@ -233,6 +260,52 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
         action: '成品入库（售后返修）',
         targetType: 'product_receipt',
         targetId: receiptId,
+      });
+      return { id: receiptId };
+    }
+
+    // ---------- 类型四：直接入库（不扣料，需求 11） ----------
+    if (d.receiptType === '直接入库（不扣料）') {
+      const mergedDirect = mergeItems(d.items);
+      if (mergedDirect.size === 0) throw Err.badRequest('请至少录入一条入库明细');
+      for (const [productId] of mergedDirect) {
+        const p = db.prepare(`SELECT id FROM products WHERE id = ?`).get(productId) as any;
+        if (!p) throw Err.notFound(`成品 #${productId} 档案不存在`);
+      }
+
+      const info = db
+        .prepare(
+          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
+        )
+        .run(receiptNo, woId, null, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, nowIso());
+      const receiptId = Number(info.lastInsertRowid);
+      const ins = db.prepare(`INSERT INTO product_receipt_items (receipt_id, product_id, qty) VALUES (?,?,?)`);
+
+      // 只有成品入库流水，没有任何物料出库流水
+      const entries: Parameters<typeof applyStock>[0] = [];
+      for (const [productId, qty] of mergedDirect) {
+        ins.run(receiptId, productId, qty);
+        entries.push({
+          itemType: 'product' as const,
+          itemId: productId,
+          direction: 'in' as const,
+          qty,
+          bizType: '成品入库',
+          bizId: receiptId,
+          bizNo: undefined,
+          operatorId: ctx.userId,
+        });
+      }
+      applyStock(entries);
+
+      if (woId) refreshWorkOrder(woId);
+      writeLog({
+        operatorId: ctx.userId,
+        action: '直接入库（不扣料）',
+        targetType: 'product_receipt',
+        targetId: receiptId,
+        detail: { qty: [...mergedDirect.values()].reduce((s, q) => s + q, 0) },
       });
       return { id: receiptId };
     }

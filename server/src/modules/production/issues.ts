@@ -30,10 +30,28 @@ const schema = z.object({
 /** 领料列表：新增「主产品名称」列（需求 3.5.2） */
 issueRouter.get('/', requirePerm('production.issue.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const where = keyword
-    ? `(i.issue_no LIKE @kw OR IFNULL(p.name,'') LIKE @kw OR w.wo_no LIKE @kw)`
-    : '1=1';
-  const params = keyword ? { kw: `%${keyword}%`, limit: pageSize, offset } : { limit: pageSize, offset };
+  // 需求 10：筛选结果优化 —— 增加日期区间、物料包含字
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (dateFrom) bind.df = dateFrom;
+  if (dateTo) bind.dt = dateTo;
+  if (materialKeyword) bind.mkw = `%${materialKeyword}%`;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) cond.push(`(i.issue_no LIKE @kw OR IFNULL(p.name,'') LIKE @kw OR w.wo_no LIKE @kw)`);
+  if (dateFrom) cond.push('i.issue_date >= @df');
+  if (dateTo) cond.push('i.issue_date <= @dt');
+  if (materialKeyword) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM material_issue_items ii JOIN materials m ON m.id = ii.material_id
+                WHERE ii.issue_id = i.id AND (m.name LIKE @mkw OR m.code LIKE @mkw))`,
+    );
+  }
+  const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
@@ -48,14 +66,21 @@ issueRouter.get('/', requirePerm('production.issue.view'), (req, res) => {
         ORDER BY i.id DESC
         LIMIT @limit OFFSET @offset`,
     )
-    .all(params) as any[];
+    .all(bind) as any[];
 
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
   const total = countRows(
     `material_issues i
       JOIN work_orders w ON w.id = i.wo_id
       LEFT JOIN products p ON p.id = w.product_id`,
-    keyword ? `(i.issue_no LIKE ? OR IFNULL(p.name,'') LIKE ? OR w.wo_no LIKE ?)` : '1=1',
-    keyword ? [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`] : [],
+    totalCond.join(' AND '),
+    totalParams,
   );
 
   const ctx = req.ctx!;

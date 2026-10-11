@@ -22,7 +22,8 @@ import {
 import { DollarOutlined, PlusOutlined } from '@ant-design/icons';
 import { financeApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PermPage, PriceText, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
+import { PermGate, PermPage, PriceText, ResponsiveTable, DockAction, CopyableCode, DetailTable } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -50,6 +51,10 @@ function SettlementInner() {
   );
   const [payables, setPayables] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
+  // 需求 28：付款单记录行展开直接显示核销明细表格
+  const settleDetail = useRowDetail((id: number) => financeApi.settlementDetail(id));
+  // 需求 28：供应商应付汇总行展开显示该供应商的待结算单据明细
+  const payableDocs = useRowDetail((id: number) => financeApi.payableDocs(id));
 
   // 新建付款单的表单状态
   const [supplierId, setSupplierId] = useState<number | undefined>();
@@ -75,6 +80,12 @@ function SettlementInner() {
 
   const totalPayable = useMemo(
     () => payables.reduce((s, p) => s + Number(p.payableAmount ?? 0), 0),
+    [payables],
+  );
+
+  // 需求 27：登记付款时只列出「有欠款」的供应商，避免选到应付为 0 的对象
+  const debtSuppliers = useMemo(
+    () => payables.filter((p) => Number(p.payableAmount ?? 0) > 0.005),
     [payables],
   );
 
@@ -214,6 +225,33 @@ function SettlementInner() {
           dataSource={payables}
           pagination={false}
           scroll={{ x: 900 }}
+          // 需求 28：展开即显示该供应商的采购结算详情（待结算单据）
+          expandable={{
+            expandedRowRender: (r) => (
+              <DetailTable
+                loading={payableDocs.loading[r.supplierId]}
+                items={payableDocs.cache[r.supplierId]?.docs ?? []}
+                columns={[
+                  {
+                    title: '类型',
+                    dataIndex: 'docType',
+                    width: 100,
+                    render: (v: any) => (
+                      <Tag color={v === 'receipt' ? 'blue' : 'orange'}>{v === 'receipt' ? '采购入库' : '采购退货'}</Tag>
+                    ),
+                  },
+                  { title: '单据摘要', dataIndex: 'itemSummary', ellipsis: true },
+                  { title: '单据编号', dataIndex: 'returnNo', width: 170, render: (v: any) => <CopyableCode value={v} /> },
+                  { title: '日期', dataIndex: 'docDate', width: 110 },
+                  { title: '单据金额', dataIndex: 'docAmount', width: 120, render: (v: any) => <PriceText value={v} /> },
+                  { title: '未结算', dataIndex: 'unsettledAmount', width: 120, render: (v: any) => <PriceText value={v} /> },
+                ]}
+              />
+            ),
+            onExpand: (expanded, r) => {
+              if (expanded) void payableDocs.load(r.supplierId);
+            },
+          }}
           columns={[
             { title: '供应商编码', dataIndex: 'supplierCode', width: 120 },
             { title: '供应商名称', dataIndex: 'supplierName' },
@@ -244,6 +282,32 @@ function SettlementInner() {
             pageSize: params.pageSize,
             total,
             onChange: (page, pageSize) => patchParams({ page, pageSize }),
+          }}
+          // 需求 28：付款单展开即列出核销明细表格
+          expandable={{
+            expandedRowRender: (r) => (
+              <DetailTable
+                loading={settleDetail.loading[r.id]}
+                items={settleDetail.cache[r.id]?.items ?? []}
+                columns={[
+                  {
+                    title: '类型',
+                    dataIndex: 'doc_type',
+                    width: 100,
+                    render: (v: any) => (
+                      <Tag color={v === 'receipt' ? 'blue' : 'orange'}>{v === 'receipt' ? '采购入库' : '采购退货'}</Tag>
+                    ),
+                  },
+                  { title: '单据编号', dataIndex: 'return_no', width: 170, render: (v: any) => <CopyableCode value={v} /> },
+                  { title: '日期', dataIndex: 'doc_date', width: 110 },
+                  { title: '单据金额', dataIndex: 'doc_amount', width: 120, render: (v: any) => <PriceText value={v} /> },
+                  { title: '本次核销', dataIndex: 'apply_amount', width: 120, render: (v: any) => <PriceText value={v} /> },
+                ]}
+              />
+            ),
+            onExpand: (expanded, r) => {
+              if (expanded) void settleDetail.load(r.id);
+            },
           }}
           columns={[
             { title: '付款单号', dataIndex: 'settle_no', width: 170, render: (v) => <CopyableCode value={v} /> },
@@ -339,11 +403,16 @@ function SettlementInner() {
               value={supplierId}
               onChange={pickSupplier}
               optionFilterProp="label"
-              options={payables.map((p) => ({
+              notFoundContent={payables.length === 0 ? '暂无供应商' : '当前没有产生欠款的供应商'}
+              options={debtSuppliers.map((p) => ({
                 value: p.supplierId,
                 label: `${p.supplierName}（应付 ${Number(p.payableAmount ?? 0).toFixed(2)}）`,
               }))}
             />
+            {/* 需求 27：说明只列有欠款供应商，并给出被隐藏的数量 */}
+            <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+              仅列出有欠款的供应商{payables.length > debtSuppliers.length ? `（已隐藏 ${payables.length - debtSuppliers.length} 家无欠款）` : ''}
+            </span>
           </Descriptions.Item>
         </Descriptions>
 

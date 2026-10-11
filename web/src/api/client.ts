@@ -93,6 +93,42 @@ export const api = {
   del: <T>(path: string) => request<T>('DELETE', path),
 };
 
+/**
+ * 下载二进制文件（需求 30：整库备份）。
+ * 必须自己发请求：备份接口要校验 token，直接用 <a href> 或 window.open 带不上 Authorization 头。
+ * 先取 blob 再触发浏览器下载，顺带从 Content-Disposition 里拿文件名。
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    let msg = `下载失败（HTTP ${res.status}）`;
+    try {
+      const j = await res.json();
+      if (j?.message) msg = j.message;
+    } catch {
+      /* 二进制响应不是 JSON，沿用默认提示 */
+    }
+    throw new Error(msg);
+  }
+
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const matched = /filename\*?=(?:UTF-8'')?["']?([^;"']+)/i.exec(disposition);
+  const fileName = matched ? decodeURIComponent(matched[1]) : fallbackName;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface ListResult<T> {
   list: T[];
   total: number;

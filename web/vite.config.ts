@@ -19,6 +19,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 监听所有网卡：局域网内其他电脑也要能打开本地测试地址
+    host: true,
     // 共享常量目录在 web 之外，需要显式放开
     fs: { allow: [repoRoot] },
     proxy: {

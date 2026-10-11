@@ -49,12 +49,26 @@ export default function LedgerPage() {
             onChange={(bizType) => patchParams({ bizType })}
             options={BIZ_TYPES.map((b) => ({ value: b, label: b }))}
           />
+          {/* 需求 21：按方向（入库 / 出库）筛选 */}
+          <Select
+            style={{ width: 130 }}
+            allowClear
+            placeholder="方向"
+            value={params.direction}
+            onChange={(direction) => patchParams({ direction })}
+            options={[
+              { value: 'in', label: '入库' },
+              { value: 'out', label: '出库' },
+            ]}
+          />
           <Button
-            onClick={() => {
+            onClick={async () => {
               if (!canExport) {
                 message.warning('无数据导出权限');
                 return;
               }
+              // 需求 21：导出跟随筛选结果
+              const res = await inventoryApi.ledger({ ...params, page: 1, pageSize: 50000 });
               const columns: any[] = [
                 { title: '库存对象', key: 'item_name' },
                 { title: '类型', key: 'item_type', render: (r: any) => (r.item_type === 'material' ? '物料' : '成品') },
@@ -68,7 +82,7 @@ export default function LedgerPage() {
                 { title: '操作人', key: 'operator_name' },
                 { title: '时间', key: 'created_at', render: (r: any) => String(r.created_at).slice(0, 19).replace('T', ' ') },
               );
-              exportCsv('流水台账', columns, list);
+              exportCsv('流水台账', columns, res.list ?? []);
             }}
           >
             导出

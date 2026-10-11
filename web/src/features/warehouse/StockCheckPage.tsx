@@ -3,7 +3,7 @@ import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm,
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode, FilterBar } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import type { ItemType } from '@shared/enums';
@@ -50,14 +50,19 @@ export default function StockCheckPage() {
       title="库存盘点"
       extra={
         <Space>
-          <Button onClick={() => exportCsv(`库存盘点_${today()}`, [
-            { title: '盘点单号', key: 'check_no' },
-            { title: '盘点日期', key: 'check_date' },
-            { title: '明细数', key: 'item_count' },
-            { title: '录入人', key: 'operator_name' },
-            { title: '审核人', key: 'auditor_name' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Input.Search placeholder="盘点单号" allowClear style={{ width: 190 }} onSearch={(keyword) => patchParams({ keyword })} />
+          {/* 需求 24：导出跟随筛选结果 */}
+          <Button onClick={async () => {
+            const res = await warehouseApi.checks({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`库存盘点_${today()}`, [
+              { title: '盘点单号', key: 'check_no' },
+              { title: '盘点日期', key: 'check_date' },
+              { title: '明细数', key: 'item_count' },
+              { title: '录入人', key: 'operator_name' },
+              { title: '审核人', key: 'auditor_name' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="warehouse.check.create">
             <DockAction icon={<PlusOutlined />} onClick={() => { setRows([]); setCheckDate(today()); setRemark(''); setOpen(true); }}>录入实盘数据</DockAction>
           </PermGate>
@@ -66,6 +71,42 @@ export default function StockCheckPage() {
     >
       <Alert type="warning" showIcon style={{ marginBottom: 12 }}
         message="盘点单录入后即进入待审核状态，被盘点对象的出入库将被锁定；管理员审核后系统按差异自动生成调整流水" />
+
+      {/* 需求 24：日期区间 + 状态 + 盘点对象包含字筛选 */}
+      <FilterBar onReset={() => patchParams({ status: '', itemKeyword: '', dateFrom: '', dateTo: '' })}>
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Select
+          allowClear
+          style={{ width: 130 }}
+          placeholder="状态"
+          value={params.status || undefined}
+          onChange={(v) => patchParams({ status: v ?? '' })}
+          options={[
+            { value: '待审核', label: '待审核' },
+            { value: '已审核', label: '已审核' },
+            { value: '已撤销', label: '已撤销' },
+          ]}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="盘点对象名称 / 编码包含"
+          value={params.itemKeyword ?? ''}
+          onChange={(e) => patchParams({ itemKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

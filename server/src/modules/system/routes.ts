@@ -12,6 +12,7 @@ import { printRouter } from './print.js';
 import { importRouter } from './import.js';
 import { initRouter } from './init.js';
 import { settingsRouter } from './settings.js';
+import { backupRouter } from './backup.js';
 
 export const systemRouter = Router();
 
@@ -172,3 +173,4 @@ systemRouter.use('/print', printRouter);
 systemRouter.use('/import', importRouter);
 systemRouter.use('/init', initRouter);
 systemRouter.use('/settings', settingsRouter);
+systemRouter.use('/backup', backupRouter);

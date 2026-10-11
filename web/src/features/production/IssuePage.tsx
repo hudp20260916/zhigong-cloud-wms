@@ -28,6 +28,7 @@ import {
   DockAction,
   CopyableCode,
   DetailTable,
+  FilterBar,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -97,7 +98,9 @@ export default function IssuePage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 10：导出跟随筛选结果
+              const res = await productionApi.issues({ ...params, page: 1, pageSize: 50000 });
               exportCsv(`生产领料_${today()}`, [
                 { title: '领料单号', key: 'issue_no' },
                 { title: '领料日期', key: 'issue_date' },
@@ -107,8 +110,8 @@ export default function IssuePage() {
                 { title: '可入库余量', key: 'remainQty' },
                 { title: '操作人', key: 'operator_name' },
                 { title: '状态', key: 'status' },
-              ], list)
-            }
+              ], res.list ?? []);
+            }}
           >
             导出
           </Button>
@@ -130,6 +133,32 @@ export default function IssuePage() {
         style={{ marginBottom: 12 }}
         message="领料必须关联生产工单，明细按 BOM 自动生成并穿透虚拟件；「去入库」仅在可入库余量大于 0 时出现"
       />
+
+      {/* 需求 10：筛选结果优化 —— 日期区间 + 物料包含字 */}
+      <FilterBar
+        onReset={() => patchParams({ keyword: '', dateFrom: '', dateTo: '', materialKeyword: '' })}
+      >
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Divider, Input, InputNumber, Row, Space, Tag, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Divider,
+  Input,
+  InputNumber,
+  Row,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import { CloudDownloadOutlined, DatabaseOutlined, FileExcelOutlined } from '@ant-design/icons';
+import * as XLSX from 'xlsx';
 import { api } from '../../api/client';
-import { PermPage } from '../../components';
+import { backupApi } from '../../api';
+import { PermPage, PermGate } from '../../components';
 
 interface SettingItem {
   key: string;
@@ -13,6 +29,9 @@ interface SettingItem {
   suffix?: string;
   hint: string;
   value: string;
+  default?: string;
+  /** 需求 29：单据编号组返回下一张单号预览 */
+  preview?: string;
 }
 
 /** 系统参数：预警阈值 + 企业信息（打印抬头） */
@@ -63,12 +82,58 @@ function SettingsInner() {
       await api.put('/system/settings', {
         items: changed.map((i) => ({ key: i.key, value: draft[i.key] })),
       });
-      message.success('已保存，预警看板立即生效');
+      message.success('已保存，预警看板与新单号立即生效');
       load();
     } catch (e: any) {
       message.error(e.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  // 需求 30：备份所有模块数据
+  const [backupInfo, setBackupInfo] = useState<any>(null);
+  const [backing, setBacking] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  useEffect(() => {
+    backupApi
+      .tables()
+      .then(setBackupInfo)
+      .catch(() => setBackupInfo(null));
+  }, []);
+
+  async function downloadDb() {
+    setBacking(true);
+    try {
+      await backupApi.downloadDb();
+      message.success('数据库备份已下载');
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setBacking(false);
+    }
+  }
+
+  /** 导出全模块 Excel：每个数据表一个 Sheet，方便人工核对 */
+  async function exportAllSheets() {
+    setExporting(true);
+    try {
+      const data = await backupApi.exportAll();
+      const wb = XLSX.utils.book_new();
+      for (const t of data.tables ?? []) {
+        const sheetName = String(t.table).slice(0, 31);
+        const aoa: any[][] = [t.columns ?? []];
+        for (const r of t.rows ?? []) aoa.push((t.columns ?? []).map((c: string) => r[c]));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), sheetName);
+      }
+      const stamp = String(data.at ?? '').slice(0, 19).replace(/[-:T]/g, '');
+      XLSX.writeFile(wb, `全模块数据备份_${stamp || Date.now()}.xlsx`);
+      message.success(`已导出 ${data.tables?.length ?? 0} 张数据表`);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -112,12 +177,57 @@ function SettingsInner() {
                     />
                   )}
                   <div style={{ marginTop: 6, color: '#888', fontSize: 12 }}>{s.hint}</div>
+                  {/* 需求 29：实时预览该类型下一张单号 */}
+                  {s.preview && (
+                    <div style={{ marginTop: 4, fontSize: 12 }}>
+                      下一张单号：<Typography.Text className="mono" strong>{s.preview}</Typography.Text>
+                    </div>
+                  )}
                 </Card>
               </Col>
             ))}
           </Row>
         </div>
       ))}
+
+      {/* 需求 30：备份所有模块数据 */}
+      <Divider orientation="left" plain>
+        数据备份
+      </Divider>
+      <PermGate permission="system.init.execute">
+        <Card size="small">
+          <Space wrap>
+            <Button
+              type="primary"
+              icon={<DatabaseOutlined />}
+              loading={backing}
+              onClick={downloadDb}
+            >
+              下载数据库备份
+            </Button>
+            <Button icon={<FileExcelOutlined />} loading={exporting} onClick={exportAllSheets}>
+              导出全模块 Excel
+            </Button>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              onClick={() => backupApi.tables().then(setBackupInfo).catch((e: any) => message.error(e.message))}
+            >
+              刷新统计
+            </Button>
+          </Space>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginTop: 12 }}
+            message={
+              backupInfo
+                ? `当前共 ${backupInfo.tableCount} 张数据表、${backupInfo.rowCount} 条记录`
+                : '正在统计数据量…'
+            }
+            description="「数据库备份」生成整库快照文件，可原样还原；「全模块 Excel」把每张数据表导出为一个 Sheet，便于人工核对。两者都只读取当前数据，不影响业务。"
+          />
+        </Card>
+      </PermGate>
     </Card>
   );
 }

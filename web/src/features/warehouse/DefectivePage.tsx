@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode, FilterBar } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -55,19 +55,47 @@ export default function DefectivePage() {
       title="不良品出库"
       extra={
         <Space>
-          <Button onClick={() => exportCsv(`不良品出库_${today()}`, [
-            { title: '出库单号', key: 'out_no' },
-            { title: '出库日期', key: 'out_date' },
-            { title: '出库内容', key: 'content' },
-            { title: '操作人', key: 'operator_name' },
-            { title: '状态', key: 'status' },
-          ], list)}>导出</Button>
+          <Input.Search placeholder="出库单号" allowClear style={{ width: 190 }} onSearch={(keyword) => patchParams({ keyword })} />
+          {/* 需求 26：导出跟随筛选结果 */}
+          <Button onClick={async () => {
+            const res = await warehouseApi.defectives({ ...params, page: 1, pageSize: 50000 });
+            exportCsv(`不良品出库_${today()}`, [
+              { title: '出库单号', key: 'out_no' },
+              { title: '出库日期', key: 'out_date' },
+              { title: '出库内容', key: 'content' },
+              { title: '操作人', key: 'operator_name' },
+              { title: '状态', key: 'status' },
+            ], res.list ?? []);
+          }}>导出</Button>
           <PermGate permission="warehouse.defective.create">
             <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setOutDate(today()); setRemark(''); setOpen(true); }}>新增不良品出库</DockAction>
           </PermGate>
         </Space>
       }
     >
+      {/* 需求 26：日期区间 + 物料名称/编码包含字筛选 */}
+      <FilterBar onReset={() => patchParams({ materialKeyword: '', dateFrom: '', dateTo: '' })}>
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="开始日期"
+          value={dayVal(params.dateFrom)}
+          onChange={(d) => patchParams({ dateFrom: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <DatePicker
+          style={{ width: 140 }}
+          placeholder="结束日期"
+          value={dayVal(params.dateTo)}
+          onChange={(d) => patchParams({ dateTo: d ? d.format('YYYY-MM-DD') : '' })}
+        />
+        <Input
+          allowClear
+          style={{ width: 190 }}
+          placeholder="物料名称 / 编码包含"
+          value={params.materialKeyword ?? ''}
+          onChange={(e) => patchParams({ materialKeyword: e.target.value })}
+        />
+      </FilterBar>
+
       <ResponsiveTable
         rowKey="id"
         size="small"

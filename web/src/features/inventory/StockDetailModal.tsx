@@ -22,6 +22,8 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
   const [data, setData] = useState<any>(null);
   const [direction, setDirection] = useState<string>('');
   const [range, setRange] = useState<any>(null);
+  // 需求 18/19：出入库详情按业务类型筛选
+  const [bizType, setBizType] = useState<string>('');
   const has = useAuthStore((s) => s.has);
   const canViewPrice = has('price.view');
   const canExport = has('export.data');
@@ -32,6 +34,7 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
         itemType,
         itemId,
         direction,
+        bizType,
         from: range?.[0]?.format('YYYY-MM-DD'),
         to: range?.[1]?.format('YYYY-MM-DD'),
       });
@@ -44,7 +47,7 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
   useEffect(() => {
     if (open) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, itemId, direction, range]);
+  }, [open, itemId, direction, bizType, range]);
 
   function doExport() {
     if (!canExport) {
@@ -88,6 +91,26 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
           ]}
         />
         <DatePicker.RangePicker value={range} onChange={(v) => setRange(v)} />
+        {/* 需求 18/19：业务类型筛选 */}
+        <Select
+          style={{ width: 170 }}
+          placeholder="业务类型"
+          value={bizType}
+          onChange={setBizType}
+          options={[
+            { value: '', label: '全部业务类型' },
+            { value: '采购入库', label: '采购入库' },
+            { value: '采购退货', label: '采购退货' },
+            { value: '生产领料', label: '生产领料' },
+            { value: '成品入库', label: '成品入库' },
+            { value: '销售出库', label: '销售出库' },
+            { value: '销售退货', label: '销售退货' },
+            { value: '期初库存', label: '期初库存' },
+            { value: '物料销售', label: '物料销售' },
+            { value: '不良品出库', label: '不良品出库' },
+            { value: '库存盘点', label: '库存盘点' },
+          ]}
+        />
         <button
           onClick={doExport}
           style={{

@@ -22,11 +22,25 @@ import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { ApiError } from '../../api/client';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
+import {
+  PermGate,
+  StatusTag,
+  PrintButton,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
-const RECEIPT_TYPES = ['成品入库（直接扣料）', '生产入库（已领料）', '售后返修入库'] as const;
+// 需求 11：新增「直接入库（不扣料）」——只增加成品库存，不校验也不扣减子物料
+const RECEIPT_TYPES = [
+  '成品入库（直接扣料）',
+  '生产入库（已领料）',
+  '售后返修入库',
+  '直接入库（不扣料）',
+] as const;
 type ReceiptType = (typeof RECEIPT_TYPES)[number];
 
 interface ItemRow {
@@ -162,7 +176,9 @@ export default function ProductReceiptPage() {
             onSearch={(keyword) => patchParams({ keyword })}
           />
           <Button
-            onClick={() =>
+            onClick={async () => {
+              // 需求 11：导出跟随筛选结果
+              const res = await productionApi.receipts({ ...params, page: 1, pageSize: 50000 });
               exportCsv(`成品入库_${today()}`, [
                 { title: '入库日期', key: 'receipt_date' },
                 { title: '入库类型', key: 'receipt_type' },
@@ -172,8 +188,8 @@ export default function ProductReceiptPage() {
                 { title: '关联领料单', key: 'issue_no' },
                 { title: '操作人', key: 'operator_name' },
                 { title: '状态', key: 'status' },
-              ], list)
-            }
+              ], res.list ?? []);
+            }}
           >
             导出
           </Button>
@@ -189,6 +205,18 @@ export default function ProductReceiptPage() {
         style={{ marginBottom: 12 }}
         message="成品入库单号在全系统前端不可见（列表、导出、打印均已移除），后台保留唯一 ID 用于追溯与撤销"
       />
+
+      {/* 需求 11：按入库类型筛选 */}
+      <FilterBar onReset={() => patchParams({ keyword: '', receiptType: '' })}>
+        <Select
+          allowClear
+          style={{ width: 220 }}
+          placeholder="入库类型"
+          value={params.receiptType || undefined}
+          onChange={(v) => patchParams({ receiptType: v ?? '' })}
+          options={RECEIPT_TYPES.map((t) => ({ value: t, label: t }))}
+        />
+      </FilterBar>
       <ResponsiveTable
         rowKey="id"
         size="small"

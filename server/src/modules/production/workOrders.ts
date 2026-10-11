@@ -22,10 +22,31 @@ const schema = z.object({
 
 workOrderRouter.get('/', requirePerm('production.wo.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const where = keyword
-    ? `(w.wo_no LIKE @kw OR p.name LIKE @kw OR IFNULL(p.code,'') LIKE @kw)`
-    : '1=1';
-  const params = keyword ? { kw: `%${keyword}%`, limit: pageSize, offset } : { limit: pageSize, offset };
+  // 需求 9：按日期区间（计划开工日）、完工状态、包含字筛选
+  const statusFilter = String(req.query.statusFilter ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const bind: any = { limit: pageSize, offset };
+  if (keyword) bind.kw = `%${keyword}%`;
+  if (dateFrom) bind.df = dateFrom;
+  if (dateTo) bind.dt = dateTo;
+
+  const cond: string[] = ['1=1'];
+  if (keyword) cond.push(`(w.wo_no LIKE @kw OR p.name LIKE @kw OR IFNULL(p.code,'') LIKE @kw)`);
+  if (dateFrom) cond.push('IFNULL(w.plan_start, w.created_at) >= @df');
+  if (dateTo) cond.push('IFNULL(w.plan_start, w.created_at) <= @dt');
+  if (statusFilter === 'producing') {
+    // 生产中：还没完工，但已经领过料
+    cond.push(`(w.status <> '已完工' AND IFNULL(w.issued_qty,0) > 0)`);
+  } else if (statusFilter === 'unfinished') {
+    // 未完工：还没入库够计划产量
+    cond.push(`(w.status <> '已完工' OR IFNULL(w.received_qty,0) < w.plan_qty)`);
+  } else if (statusFilter === 'finished') {
+    // 已完工：标记完工，或入库量已达计划产量
+    cond.push(`(w.status = '已完工' OR IFNULL(w.received_qty,0) >= w.plan_qty)`);
+  }
+  const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
@@ -36,12 +57,20 @@ workOrderRouter.get('/', requirePerm('production.wo.view'), (req, res) => {
         ORDER BY w.id DESC
         LIMIT @limit OFFSET @offset`,
     )
-    .all(params) as any[];
+    .all(bind) as any[];
 
+  // countRows 走位置参数：按占位符出现顺序入参，避免个数对不上
+  const totalParams: any[] = [];
+  const totalCond = cond.map((c) =>
+    c.replace(/@(\w+)/g, (_m, name: string) => {
+      totalParams.push(bind[name]);
+      return '?';
+    }),
+  );
   const total = countRows(
     `work_orders w JOIN products p ON p.id = w.product_id`,
-    keyword ? `(w.wo_no LIKE ? OR p.name LIKE ? OR IFNULL(p.code,'') LIKE ?)` : '1=1',
-    keyword ? [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`] : [],
+    totalCond.join(' AND '),
+    totalParams,
   );
 
   const ctx = req.ctx!;

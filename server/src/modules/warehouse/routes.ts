@@ -27,17 +27,53 @@ const materialItem = z.object({
 // ---------------- 物料销售 ----------------
 
 warehouseRouter.get('/material-sales', requirePerm('warehouse.materialSale.view'), (req, res) => {
-  const { page, pageSize, offset } = parsePage(req);
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  // 需求 25：按日期区间、客户、物料名称/编码包含字筛选
+  const customerId = Number(req.query.customerId ?? 0) || 0;
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const cond: string[] = ['1=1'];
+  const params: any[] = [];
+  if (keyword) {
+    cond.push(`(s.sale_no LIKE ?)`);
+    params.push(`%${keyword}%`);
+  }
+  if (customerId) {
+    cond.push('s.customer_id = ?');
+    params.push(customerId);
+  }
+  if (dateFrom) {
+    cond.push('s.sale_date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    cond.push('s.sale_date <= ?');
+    params.push(dateTo);
+  }
+  if (materialKeyword) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM material_sale_items i JOIN materials m ON m.id = i.material_id
+                WHERE i.sale_id = s.id AND (m.name LIKE ? OR m.code LIKE ?))`,
+    );
+    params.push(`%${materialKeyword}%`, `%${materialKeyword}%`);
+  }
+  const where = cond.join(' AND ');
+
   const rows = db
     .prepare(
-      `SELECT s.*, u.display_name AS operator_name,
+      `SELECT s.*, c.name AS customer_name, u.display_name AS operator_name,
               (SELECT IFNULL(GROUP_CONCAT(m.name || '×' || i.qty, '、'), '')
                  FROM material_sale_items i JOIN materials m ON m.id = i.material_id
                 WHERE i.sale_id = s.id) AS content
-         FROM material_sales s LEFT JOIN users u ON u.id = s.operator_id
+         FROM material_sales s
+         LEFT JOIN customers c ON c.id = s.customer_id
+         LEFT JOIN users u ON u.id = s.operator_id
+        WHERE ${where}
         ORDER BY s.id DESC LIMIT ? OFFSET ?`,
     )
-    .all(pageSize, offset) as any[];
+    .all(...params, pageSize, offset) as any[];
   const ctx = req.ctx!;
   okList(
     res,
@@ -45,7 +81,11 @@ warehouseRouter.get('/material-sales', requirePerm('warehouse.materialSale.view'
       ...r,
       canUndo: ctx.permissions.includes('warehouse.materialSale.create') && r.status === DOC_STATUS.VALID,
     })),
-    countRows('material_sales'),
+    countRows(
+      `material_sales s LEFT JOIN customers c ON c.id = s.customer_id`,
+      where,
+      params,
+    ),
   );
 });
 
@@ -115,7 +155,35 @@ warehouseRouter.post('/material-sales/:id/undo', requirePerm('warehouse.material
 // ---------------- 不良品出库 ----------------
 
 warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req, res) => {
-  const { page, pageSize, offset } = parsePage(req);
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  // 需求 26：按日期区间、物料名称/编码包含字筛选
+  const materialKeyword = String(req.query.materialKeyword ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const cond: string[] = ['1=1'];
+  const params: any[] = [];
+  if (keyword) {
+    cond.push(`(d.out_no LIKE ?)`);
+    params.push(`%${keyword}%`);
+  }
+  if (dateFrom) {
+    cond.push('d.out_date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    cond.push('d.out_date <= ?');
+    params.push(dateTo);
+  }
+  if (materialKeyword) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM defective_out_items i JOIN materials m ON m.id = i.material_id
+                WHERE i.out_id = d.id AND (m.name LIKE ? OR m.code LIKE ?))`,
+    );
+    params.push(`%${materialKeyword}%`, `%${materialKeyword}%`);
+  }
+  const where = cond.join(' AND ');
+
   const rows = db
     .prepare(
       `SELECT d.*, u.display_name AS operator_name,
@@ -123,9 +191,10 @@ warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req
                  FROM defective_out_items i JOIN materials m ON m.id = i.material_id
                 WHERE i.out_id = d.id) AS content
          FROM defective_outs d LEFT JOIN users u ON u.id = d.operator_id
+        WHERE ${where}
         ORDER BY d.id DESC LIMIT ? OFFSET ?`,
     )
-    .all(pageSize, offset) as any[];
+    .all(...params, pageSize, offset) as any[];
   const ctx = req.ctx!;
   okList(
     res,
@@ -133,7 +202,7 @@ warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req
       ...r,
       canUndo: ctx.permissions.includes('warehouse.defective.create') && r.status === DOC_STATUS.VALID,
     })),
-    countRows('defective_outs'),
+    countRows(`defective_outs d LEFT JOIN users u ON u.id = d.operator_id`, where, params),
   );
 });
 
@@ -199,7 +268,43 @@ warehouseRouter.post('/defectives/:id/undo', requirePerm('warehouse.defective.cr
 // ---------------- 库存盘点 ----------------
 
 warehouseRouter.get('/checks', requirePerm('warehouse.check.view'), (req, res) => {
-  const { page, pageSize, offset } = parsePage(req);
+  const { page, pageSize, offset, keyword } = parsePage(req);
+  // 需求 24：按日期区间、状态、盘点对象（物料/成品名称或编码）包含字筛选
+  const status = String(req.query.status ?? '').trim();
+  const itemKeyword = String(req.query.itemKeyword ?? '').trim();
+  const dateFrom = String(req.query.dateFrom ?? '').trim();
+  const dateTo = String(req.query.dateTo ?? '').trim();
+
+  const cond: string[] = ['1=1'];
+  const params: any[] = [];
+  if (keyword) {
+    cond.push('c.check_no LIKE ?');
+    params.push(`%${keyword}%`);
+  }
+  if (status) {
+    cond.push('c.status = ?');
+    params.push(status);
+  }
+  if (dateFrom) {
+    cond.push('c.check_date >= ?');
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    cond.push('c.check_date <= ?');
+    params.push(dateTo);
+  }
+  if (itemKeyword) {
+    cond.push(
+      `EXISTS (SELECT 1 FROM stock_check_items i
+                 LEFT JOIN materials m ON i.item_type = 'material' AND m.id = i.item_id
+                 LEFT JOIN products p ON i.item_type = 'product' AND p.id = i.item_id
+                WHERE i.check_id = c.id
+                  AND (m.name LIKE ? OR m.code LIKE ? OR p.name LIKE ? OR p.code LIKE ?))`,
+    );
+    params.push(`%${itemKeyword}%`, `%${itemKeyword}%`, `%${itemKeyword}%`, `%${itemKeyword}%`);
+  }
+  const where = cond.join(' AND ');
+
   const rows = db
     .prepare(
       `SELECT c.*, u.display_name AS operator_name, a.display_name AS auditor_name,
@@ -207,9 +312,10 @@ warehouseRouter.get('/checks', requirePerm('warehouse.check.view'), (req, res) =
          FROM stock_checks c
          LEFT JOIN users u ON u.id = c.operator_id
          LEFT JOIN users a ON a.id = c.auditor_id
+        WHERE ${where}
         ORDER BY c.id DESC LIMIT ? OFFSET ?`,
     )
-    .all(pageSize, offset) as any[];
+    .all(...params, pageSize, offset) as any[];
   const ctx = req.ctx!;
   okList(
     res,
@@ -218,7 +324,13 @@ warehouseRouter.get('/checks', requirePerm('warehouse.check.view'), (req, res) =
       canAudit: ctx.permissions.includes('warehouse.check.audit') && r.status === '待审核',
       canUndo: ctx.permissions.includes('warehouse.check.audit') && r.status === '已审核',
     })),
-    countRows('stock_checks'),
+    countRows(
+      `stock_checks c
+         LEFT JOIN users u ON u.id = c.operator_id
+         LEFT JOIN users a ON a.id = c.auditor_id`,
+      where,
+      params,
+    ),
   );
 });
 

@@ -224,6 +224,28 @@ export const DOC_TYPES: DocTypeDef[] = [
       { title: '金额', key: 'amount', money: true },
     ],
   },
+  {
+    // 需求 25：物料销售单打印模板
+    docType: 'material_sale',
+    name: '物料销售单',
+    paper: 'A4',
+    orientation: 'portrait',
+    meta: [
+      { label: '销售单号', key: 'no' },
+      { label: '客户', key: 'partnerName' },
+      { label: '销售日期', key: 'docDate' },
+      { label: '备注', key: 'remark' },
+    ],
+    itemColumns: [
+      { title: '物料编码', key: 'code' },
+      { title: '物料名称', key: 'name' },
+      { title: '规格', key: 'spec' },
+      { title: '单位', key: 'unit' },
+      { title: '数量', key: 'qty' },
+      { title: '单价', key: 'price', money: true },
+      { title: '金额', key: 'amount', money: true },
+    ],
+  },
 ];
 
 function docTypeDef(docType: string): DocTypeDef {
@@ -645,6 +667,33 @@ export function buildPrintData(docType: string, id: number, withPrice: boolean):
         partnerName: h.customer_name ?? '',
         docDate: h.return_date,
         refNo: h.order_no ?? '',
+        remark: h.remark ?? '',
+        operatorName: operatorName(h.operator_id),
+        items: hide(items),
+      };
+      break;
+    }
+    case 'material_sale': {
+      // 需求 25：物料销售单打印取数
+      const h = db
+        .prepare(
+          `SELECT s.*, c.name AS customer_name FROM material_sales s
+             LEFT JOIN customers c ON c.id = s.customer_id WHERE s.id = ?`,
+        )
+        .get(id) as any;
+      if (!h) throw Err.notFound('物料销售单不存在');
+      const items = db
+        .prepare(
+          `SELECT m.code, m.name, IFNULL(m.spec,'') AS spec, IFNULL(m.unit,'') AS unit,
+                  i.qty, i.price, (i.qty * i.price) AS amount
+             FROM material_sale_items i JOIN materials m ON m.id = i.material_id
+            WHERE i.sale_id = ? ORDER BY i.id`,
+        )
+        .all(id) as any[];
+      data = {
+        no: h.sale_no,
+        partnerName: h.customer_name ?? '',
+        docDate: h.sale_date,
         remark: h.remark ?? '',
         operatorName: operatorName(h.operator_id),
         items: hide(items),
