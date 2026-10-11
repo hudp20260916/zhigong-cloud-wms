@@ -74,6 +74,21 @@ export const IMPORT_KINDS: ImportKindDef[] = [
     ],
   },
   {
+    kind: 'product',
+    name: '产品档案',
+    hint: '编码、名称为必填且不可重复；单位留空默认「台」，BOM 版本留空默认 V1.0；只建档案不写库存，期初数量请走「期初库存」导入。',
+    columns: [
+      { key: 'code', label: '产品编码', required: true },
+      { key: 'name', label: '产品名称', required: true },
+      { key: 'spec', label: '规格型号' },
+      { key: 'unit', label: '单位' },
+      { key: 'packingSpec', label: '装箱规格' },
+      { key: 'safetyStock', label: '安全库存' },
+      { key: 'bomVersion', label: 'BOM版本' },
+      { key: 'remark', label: '备注' },
+    ],
+  },
+  {
     kind: 'initial_stock',
     name: '期初库存',
     hint: '类型填「物料」或「成品」，留空时按编码自动识别；数量为必填且不小于 0；单价仅对物料生效，用于初始化移动加权成本。每个对象的期初库存为「设定」语义，重复导入会覆盖上次结果。',
@@ -220,6 +235,7 @@ class BatchRollback extends Error {
 
 function applyRow(kind: string, r: Record<string, any>, operatorId: number): void {
   if (kind === 'material') return importMaterial(r);
+  if (kind === 'product') return importProduct(r);
   if (kind === 'supplier') return importPartner('suppliers', r);
   if (kind === 'customer') return importPartner('customers', r);
   if (kind === 'initial_stock') return importInitial(r, operatorId);
@@ -267,6 +283,37 @@ function importMaterial(r: Record<string, any>): void {
     supplierId,
     safety ?? 0,
     yes(r.isVirtual) ? 1 : 0,
+    str(r.remark),
+    nowIso(),
+    nowIso(),
+  );
+}
+
+function importProduct(r: Record<string, any>): void {
+  const code = str(r.code);
+  const name = str(r.name);
+  if (!code) throw new Error('产品编码不能为空');
+  if (!name) throw new Error('产品名称不能为空');
+  ensureUnique('products', code, name);
+
+  const safety = num(r.safetyStock);
+  if (safety !== null && safety < 0) throw new Error('安全库存不能为负数');
+
+  // 只建档案，不写库存：current_stock 固定 0，期初数量走 initial_stock 导入，
+  // 避免两条路径都能改库存导致口径不一致（库存变更只认 ledger）。
+  db.prepare(
+    `INSERT INTO products (code, name, pinyin, spec, unit, packing_spec,
+                           safety_stock, current_stock, bom_version, remark, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,0,?,?,?,?)`,
+  ).run(
+    code,
+    name,
+    pinyinInitials(name),
+    str(r.spec),
+    str(r.unit) || '台',
+    str(r.packingSpec),
+    safety ?? 0,
+    str(r.bomVersion) || 'V1.0',
     str(r.remark),
     nowIso(),
     nowIso(),

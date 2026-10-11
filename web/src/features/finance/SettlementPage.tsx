@@ -22,7 +22,7 @@ import {
 import { DollarOutlined, PlusOutlined } from '@ant-design/icons';
 import { financeApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PermPage, PriceText, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PermPage, PriceText, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -246,7 +246,7 @@ function SettlementInner() {
             onChange: (page, pageSize) => patchParams({ page, pageSize }),
           }}
           columns={[
-            { title: '付款单号', dataIndex: 'settle_no', width: 170 },
+            { title: '付款单号', dataIndex: 'settle_no', width: 170, render: (v) => <CopyableCode value={v} /> },
             { title: '付款日期', dataIndex: 'settle_date', width: 110 },
             { title: '供应商', dataIndex: 'supplier_name', width: 200 },
             { title: '方式', dataIndex: 'method', width: 80 },
@@ -521,7 +521,7 @@ function SettlementInner() {
                   width: 90,
                   render: (v) => <Tag color={v === 'receipt' ? 'blue' : 'orange'}>{v === 'receipt' ? '采购入库' : '采购退货'}</Tag>,
                 },
-                { title: '单据编号', dataIndex: 'return_no', width: 170, render: (v) => v || '—' },
+                { title: '单据编号', dataIndex: 'return_no', width: 170, render: (v) => <CopyableCode value={v} /> },
                 { title: '日期', dataIndex: 'doc_date', width: 110 },
                 { title: '单据金额', dataIndex: 'doc_amount', width: 120, align: 'right', render: (v) => <PriceText value={v} /> },
                 { title: '本次核销', dataIndex: 'apply_amount', width: 120, align: 'right', render: (v) => <PriceText value={v} /> },

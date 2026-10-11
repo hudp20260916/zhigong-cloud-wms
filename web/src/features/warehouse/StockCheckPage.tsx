@@ -3,7 +3,7 @@ import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm,
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import type { ItemType } from '@shared/enums';
@@ -74,7 +74,7 @@ export default function StockCheckPage() {
         scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
-          { title: '盘点单号', dataIndex: 'check_no', width: 160 },
+          { title: '盘点单号', dataIndex: 'check_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '盘点日期', dataIndex: 'check_date', width: 110 },
           { title: '明细数', dataIndex: 'item_count', width: 90, className: 'mono' },
           { title: '录入人', dataIndex: 'operator_name', width: 110 },

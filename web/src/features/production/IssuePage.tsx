@@ -19,7 +19,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -132,7 +132,7 @@ export default function IssuePage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '领料单号', dataIndex: 'issue_no', width: 150 },
+          { title: '领料单号', dataIndex: 'issue_no', width: 150, render: (v) => <CopyableCode value={v} /> },
           { title: '领料日期', dataIndex: 'issue_date', width: 110 },
           {
             // 需求 3.5.2：领料列表新增「主产品名称」列，过长悬浮查看，导出同步
@@ -146,7 +146,7 @@ export default function IssuePage() {
               </Tooltip>
             ),
           },
-          { title: '工单编号', dataIndex: 'wo_no', width: 150 },
+          { title: '工单编号', dataIndex: 'wo_no', width: 150, render: (v) => <CopyableCode value={v} /> },
           { title: '工单计划产量', dataIndex: 'plan_qty', width: 110, className: 'mono' },
           { title: '生产数量', dataIndex: 'produce_qty', width: 100, className: 'mono' },
           {

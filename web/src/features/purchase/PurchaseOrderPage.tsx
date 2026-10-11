@@ -24,7 +24,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import { summarize } from '@shared/enums';
@@ -299,7 +299,7 @@ export default function PurchaseOrderPage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '订单编号', dataIndex: 'order_no', width: 160 },
+          { title: '订单编号', dataIndex: 'order_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           {
             title: '主产品名称',
             dataIndex: 'product_name',

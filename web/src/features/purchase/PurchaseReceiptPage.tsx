@@ -22,7 +22,7 @@ import {
 import { PlusOutlined, ScanOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import OcrImportModal, { type OcrDraft } from './OcrImportModal';
@@ -256,7 +256,7 @@ export default function PurchaseReceiptPage() {
             ),
           },
           { title: '供应商', dataIndex: 'supplier_name', width: 200, render: (v) => v || '-' },
-          { title: '关联订单', dataIndex: 'order_no', width: 150, render: (v) => v || '无关联订单' },
+          { title: '关联订单', dataIndex: 'order_no', width: 150, render: (v) => (v ? <CopyableCode value={v} /> : '无关联订单') },
           {
             title: '金额',
             dataIndex: 'total_amount',

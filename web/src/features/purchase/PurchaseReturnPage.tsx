@@ -17,7 +17,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -142,7 +142,7 @@ export default function PurchaseReturnPage() {
           onChange: (page, pageSize) => patchParams({ page, pageSize }),
         }}
         columns={[
-          { title: '退货单号', dataIndex: 'return_no', width: 160 },
+          { title: '退货单号', dataIndex: 'return_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '退货日期', dataIndex: 'return_date', width: 110 },
           { title: '供应商', dataIndex: 'supplier_name', width: 200 },
           { title: '退货内容', dataIndex: 'material_names', ellipsis: true },

@@ -16,7 +16,8 @@ import {
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, ResponsiveTable, DockAction, ImportExcelModal } from '../../components';
+import { exportCsv } from '../../utils/exportCsv';
 
 interface BomRow {
   key: string;
@@ -178,6 +179,25 @@ export default function ProductPage() {
             style={{ width: 240 }}
             onSearch={(keyword) => patchParams({ keyword })}
           />
+          {/* 需求 2：成品档案的导入导出与模板 */}
+          <Button
+            onClick={() =>
+              exportCsv(`成品档案_${Date.now()}`, [
+                { title: '产品编码', key: 'code' },
+                { title: '产品名称', key: 'name' },
+                { title: '规格型号', key: 'spec' },
+                { title: '单位', key: 'unit' },
+                { title: '装箱规格', key: 'packing_spec' },
+                { title: '安全库存', key: 'safety_stock' },
+                { title: '当前库存', key: 'current_stock' },
+                { title: 'BOM版本', key: 'bom_version' },
+                { title: '备注', key: 'remark' },
+              ], list)
+            }
+          >
+            导出
+          </Button>
+          <ImportExcelModal kind="product" onSuccess={reload} />
           <PermGate permission="archive.product.manage">
             <DockAction icon={<PlusOutlined />} onClick={openCreate}>新增成品</DockAction>
           </PermGate>

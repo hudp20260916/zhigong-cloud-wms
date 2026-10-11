@@ -1,7 +1,7 @@
 import { Button, Card, Input, Space, Table, Tag, Tooltip } from 'antd';
 import { purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PriceText, ResponsiveTable } from '../../components';
+import { PriceText, ResponsiveTable, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 
 /** 到货核对：采购内容列 + 主产品/物料名称搜索 + 导出同步包含采购内容（需求 3.4.5） */
@@ -60,8 +60,8 @@ export default function ArrivalPage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '订单编号', dataIndex: 'order_no', width: 150 },
-          { title: '父订单号', dataIndex: 'parent_order_no', width: 140, render: (v) => v || '-' },
+          { title: '订单编号', dataIndex: 'order_no', width: 150, render: (v) => <CopyableCode value={v} /> },
+          { title: '父订单号', dataIndex: 'parent_order_no', width: 140, render: (v) => <CopyableCode value={v} /> },
           {
             title: '采购内容',
             dataIndex: 'purchaseContent',

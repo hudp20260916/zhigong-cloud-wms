@@ -4,7 +4,7 @@ import { Button, Card, DatePicker, Input, InputNumber, Modal, Select, Space, Tab
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -86,7 +86,7 @@ export default function SaleOrderPage() {
         scroll={{ x: 1200 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
-          { title: '销售单号', dataIndex: 'order_no', width: 160 },
+          { title: '销售单号', dataIndex: 'order_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '开单日期', dataIndex: 'order_date', width: 110 },
           { title: '客户', dataIndex: 'customer_name', width: 220, render: (v) => v || '-' },
           { title: '数量合计', dataIndex: 'total_qty', width: 100, className: 'mono' },

@@ -18,7 +18,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 
 export default function WorkOrderPage() {
@@ -141,7 +141,7 @@ export default function WorkOrderPage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '工单编号', dataIndex: 'wo_no', width: 160 },
+          { title: '工单编号', dataIndex: 'wo_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '主产品', dataIndex: 'product_name', width: 180 },
           { title: '计划产量', dataIndex: 'plan_qty', width: 100, className: 'mono' },
           { title: 'BOM版本', dataIndex: 'bom_version', width: 100 },

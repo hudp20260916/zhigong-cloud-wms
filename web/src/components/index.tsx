@@ -4,8 +4,10 @@ import { useAuthStore } from '../stores/auth';
 import { PrintButton } from './PrintButton';
 import { ResponsiveTable } from './ResponsiveTable';
 import { DockAction } from './DockAction';
+import ImportExcelModal from './ImportExcelModal';
+import { CopyableCode } from './CopyableCode';
 
-export { PrintButton, ResponsiveTable, DockAction };
+export { PrintButton, ResponsiveTable, DockAction, ImportExcelModal, CopyableCode };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
 export function PermGate({

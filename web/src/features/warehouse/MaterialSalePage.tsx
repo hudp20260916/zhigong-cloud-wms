@@ -3,7 +3,7 @@ import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -65,7 +65,7 @@ export default function MaterialSalePage() {
         scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
-          { title: '销售单号', dataIndex: 'sale_no', width: 160 },
+          { title: '销售单号', dataIndex: 'sale_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '销售日期', dataIndex: 'sale_date', width: 110 },
           { title: '销售内容', dataIndex: 'content', ellipsis: true },
           { title: '金额', dataIndex: 'total_amount', width: 120, render: (v) => <PriceText value={v} /> },

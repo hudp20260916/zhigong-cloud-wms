@@ -17,7 +17,14 @@ import {
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  ResponsiveTable,
+  DockAction,
+  ImportExcelModal,
+} from '../../components';
 import { exportCsv } from '../../utils/exportCsv';
 
 interface Material {
@@ -119,6 +126,8 @@ export default function MaterialPage() {
           >
             导出
           </Button>
+          {/* 需求 1：物料档案页内直接导入 Excel，并附带导入模板下载 */}
+          <ImportExcelModal kind="material" onSuccess={reload} />
           <PermGate permission="archive.material.manage">
             <DockAction icon={<PlusOutlined />} onClick={openCreate}>新增物料</DockAction>
           </PermGate>

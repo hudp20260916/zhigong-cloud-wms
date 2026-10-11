@@ -4,7 +4,7 @@ import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, PriceText, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -78,9 +78,9 @@ export default function SaleReturnPage() {
         scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
-          { title: '退货单号', dataIndex: 'return_no', width: 160 },
+          { title: '退货单号', dataIndex: 'return_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '退货日期', dataIndex: 'return_date', width: 110 },
-          { title: '关联销售单', dataIndex: 'order_no', width: 160, render: (v) => v || '-' },
+          { title: '关联销售单', dataIndex: 'order_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '客户', dataIndex: 'customer_name', width: 220, render: (v) => v || '-' },
           { title: '金额', dataIndex: 'total_amount', width: 120, render: (v) => <PriceText value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },

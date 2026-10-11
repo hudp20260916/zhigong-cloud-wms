@@ -22,7 +22,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { ApiError } from '../../api/client';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, StatusTag, PrintButton, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -212,8 +212,8 @@ export default function ProductReceiptPage() {
           },
           { title: '入库内容', dataIndex: 'content', ellipsis: true },
           { title: '总数', dataIndex: 'total_qty', width: 90, className: 'mono' },
-          { title: '关联工单', dataIndex: 'wo_no', width: 150, render: (v) => v || '-' },
-          { title: '关联领料单', dataIndex: 'issue_no', width: 150, render: (v) => v || '-' },
+          { title: '关联工单', dataIndex: 'wo_no', width: 150, render: (v) => <CopyableCode value={v} /> },
+          { title: '关联领料单', dataIndex: 'issue_no', width: 150, render: (v) => <CopyableCode value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
           {

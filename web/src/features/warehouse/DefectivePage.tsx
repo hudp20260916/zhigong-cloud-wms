@@ -3,7 +3,7 @@ import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -60,7 +60,7 @@ export default function DefectivePage() {
         scroll={{ x: 1000 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
-          { title: '出库单号', dataIndex: 'out_no', width: 160 },
+          { title: '出库单号', dataIndex: 'out_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '出库日期', dataIndex: 'out_date', width: 110 },
           { title: '出库内容', dataIndex: 'content', ellipsis: true },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },

@@ -3,7 +3,8 @@ import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, message } f
 import { PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, ResponsiveTable, DockAction } from '../../components';
+import { PermGate, ResponsiveTable, DockAction, ImportExcelModal } from '../../components';
+import { exportCsv } from '../../utils/exportCsv';
 
 interface Partner {
   id: number;
@@ -68,6 +69,21 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
             style={{ width: 220 }}
             onSearch={(keyword) => patchParams({ keyword })}
           />
+          {/* 需求 3/4：供应商 / 客户档案的导入导出与模板 */}
+          <Button
+            onClick={() =>
+              exportCsv(`${label}档案_${Date.now()}`, [
+                { title: `${label}编码`, key: 'code' },
+                { title: `${label}名称`, key: 'name' },
+                { title: '联系人', key: 'contact' },
+                { title: '联系电话', key: 'phone' },
+                { title: '备注', key: 'remark' },
+              ], list)
+            }
+          >
+            导出
+          </Button>
+          <ImportExcelModal kind={kind} onSuccess={reload} />
           <PermGate permission="archive.partner.manage">
             <DockAction icon={<PlusOutlined />} onClick={openCreate}>新增{label}</DockAction>
           </PermGate>
