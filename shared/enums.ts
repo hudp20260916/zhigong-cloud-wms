@@ -16,6 +16,7 @@ export const BIZ_TYPE = {
   DEFECTIVE_OUT: '不良品出库',
   CHECK_ADJUST: '盘点调整',
   ISSUE: '生产领料',
+  MATERIAL_RETURN: '生产退料',
   PRODUCT_IN: '成品入库',
   SALE_OUT: '销售出库',
   SALE_RETURN: '销售退货',

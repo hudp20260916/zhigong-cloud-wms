@@ -64,6 +64,7 @@ const MENU: MenuNode[] = [
     children: [
       { key: '/production/work-orders', label: '生产工单', permission: 'production.wo.view' },
       { key: '/production/issues', label: '生产领料', permission: 'production.issue.view' },
+      { key: '/production/returns', label: '生产退料', permission: 'production.issue.view' },
       { key: '/production/receipts', label: '成品入库', permission: 'production.receipt.view' },
     ],
   },

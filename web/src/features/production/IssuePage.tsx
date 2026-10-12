@@ -243,6 +243,17 @@ export default function IssuePage() {
                     <span style={{ color: '#8c8c8c', fontSize: 12 }}>余量不足</span>
                   </Tooltip>
                 )}
+                {r.status === '有效' && (
+                  <Tooltip title="领了料但未投产的部分，按原单原量退回物料库存">
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => navigate('/production/returns', { state: { issueId: r.id } })}
+                    >
+                      去退料
+                    </Button>
+                  </Tooltip>
+                )}
                 {r.canUndo && (
                   <Popconfirm
                     title="确认撤销该领料单？"

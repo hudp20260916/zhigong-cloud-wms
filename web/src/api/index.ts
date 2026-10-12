@@ -101,6 +101,13 @@ export const productionApi = {
   createIssue: (b: any) => api.post<{ id: number }>('/production/issues', b),
   undoIssue: (id: number) => api.post<{ id: number }>(`/production/issues/${id}/undo`),
 
+  // 生产退料：按原领料单原量退回（计划 100 实产 98 场景）
+  materialReturns: (p?: any) => api.get<ListResult<any>>('/production/returns', p),
+  materialReturnDetail: (id: number) => api.get<any>(`/production/returns/${id}`),
+  returnableOf: (issueId: number) => api.get<any>(`/production/returns/returnable/${issueId}`),
+  createMaterialReturn: (b: any) => api.post<{ id: number }>('/production/returns', b),
+  undoMaterialReturn: (id: number) => api.post<{ id: number }>(`/production/returns/${id}/undo`),
+
   receipts: (p?: any) => api.get<ListResult<any>>('/production/receipts', p),
   receiptDetail: (id: number) => api.get<any>(`/production/receipts/${id}`),
   createReceipt: (b: any) => api.post<{ id: number }>('/production/receipts', b),

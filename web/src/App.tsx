@@ -13,6 +13,7 @@ import InitialStockPage from './features/inventory/InitialStockPage';
 import LedgerPage from './features/inventory/LedgerPage';
 import WorkOrderPage from './features/production/WorkOrderPage';
 import IssuePage from './features/production/IssuePage';
+import MaterialReturnPage from './features/production/MaterialReturnPage';
 import ProductReceiptPage from './features/production/ProductReceiptPage';
 import PurchaseOrderPage from './features/purchase/PurchaseOrderPage';
 import PurchaseReceiptPage from './features/purchase/PurchaseReceiptPage';
@@ -92,6 +93,7 @@ export default function App() {
           <Route path="inventory/ledger" element={<LedgerPage />} />
           <Route path="production/work-orders" element={<WorkOrderPage />} />
           <Route path="production/issues" element={<IssuePage />} />
+          <Route path="production/returns" element={<MaterialReturnPage />} />
           <Route path="production/receipts" element={<ProductReceiptPage />} />
           <Route path="purchase/orders" element={<PurchaseOrderPage />} />
           <Route path="purchase/receipts" element={<PurchaseReceiptPage />} />
