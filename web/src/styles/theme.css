@@ -1,0 +1,223 @@
+/**
+ * 风格需求（2026-10-12）：暗黑极简默认主风格 + 监控页三种视觉皮肤。
+ *
+ * 结构：
+ *  1. 全局主题变量层（:root / .theme-dark / .theme-light）—— 跟 antd token 对齐，
+ *     让 main.tsx 之外的硬编码色（.app-header、.mobile-card、.row-error 等）也能换肤。
+ *  2. 监控页视觉皮肤（.dash-minimal / .dash-hud / .dash-neon）—— 只作用在 DashboardPage
+ *     容器上，可切换、不影响其它页面。
+ *
+ * 配色层级规范（避免撞色）：深背景 / 单一蓝青高亮 / 灰阶文本。
+ */
+
+/* ============================================================
+   一、全局主题变量
+   ============================================================ */
+:root {
+  /* 亮色兜底（.theme-light 未加载前用） */
+  --bg-layout: #f5f6f8;
+  --bg-container: #ffffff;
+  --bg-elevated: #ffffff;
+  --border-1: #f0f0f0;
+  --border-2: #d9d9d9;
+  --text-1: #1f2328;
+  --text-2: #57606a;
+  --text-3: #8c959f;
+  --hl: #3b82f6;
+  --hl-soft: rgba(59, 130, 246, 0.12);
+}
+
+/* 暗黑极简（默认主风格）：深背景 + 单一蓝青高亮 + 灰阶文本 */
+.theme-dark {
+  --bg-layout: #0e1116;
+  --bg-container: #161b22;
+  --bg-elevated: #1a2028;
+  --border-1: #21262d;
+  --border-2: #30363d;
+  --text-1: #e6edf3;
+  --text-2: #8b949e;
+  --text-3: #6e7681;
+  --hl: #22d3ee;
+  --hl-alt: #3b82f6;
+  --hl-soft: rgba(34, 211, 238, 0.12);
+  background: var(--bg-layout);
+}
+
+.theme-light {
+  --hl-alt: #3b82f6;
+  background: var(--bg-layout);
+}
+
+/* 内容区背景跟随主题（antd Layout.Content 用了写死的 #f5f6f8，这里盖过去） */
+.theme-dark .ant-layout-content {
+  background: var(--bg-layout) !important;
+}
+
+/* 顶栏背景跟随主题（原 .app-header 写死 #fff） */
+.theme-dark .app-header {
+  background: var(--bg-container);
+  border-bottom: 1px solid var(--border-1);
+}
+.theme-dark .app-logo {
+  color: var(--hl);
+}
+
+/* 移动端卡片（原写死 #fff / #f0f0f0） */
+.theme-dark .mobile-card {
+  background: var(--bg-container);
+  border-color: var(--border-1);
+}
+.theme-dark .mobile-card__sub,
+.theme-dark .mobile-card__label {
+  color: var(--text-3);
+}
+.theme-dark .mobile-card__actions {
+  border-top-color: var(--border-1);
+}
+
+/* 表格行状态色（原写死浅色）：暗黑下用深色高亮，保持可读 */
+.theme-dark .row-error > td {
+  background: rgba(255, 77, 79, 0.16) !important;
+}
+.theme-dark .row-error:hover > td {
+  background: rgba(255, 77, 79, 0.24) !important;
+}
+.theme-dark .row-muted > td {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text-3);
+}
+.theme-dark .row-muted:hover > td {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 低库存行高亮（原 #fff7f0） */
+.theme-dark .low-stock-row {
+  background: var(--hl-soft);
+}
+
+/* 提示性小字兜底：各页面散落写死的 #8c8c8c / #888 / #666 在暗黑下太暗，
+   统一托到灰阶可读值（--text-3）。用 attribute 选择器按行内色匹配，避免逐文件改。 */
+.theme-dark [style*="color: #8c8c8c"],
+.theme-dark [style*="color: #888"],
+.theme-dark [style*="color:#8c8c8c"],
+.theme-dark [style*="color:#888"],
+.theme-dark [style*="color: #666"],
+.theme-dark [style*="color:#666"] {
+  color: var(--text-2) !important;
+}
+
+/* 弹窗底部吸附条写死的 #fff */
+.theme-dark .ant-modal-footer {
+  background: var(--bg-elevated);
+  border-top-color: var(--border-1);
+}
+
+/* 登录页背景渐变（原写死浅色） */
+.theme-dark {
+  --login-bg: linear-gradient(180deg, #0b0e13 0%, #161b22 100%);
+}
+
+/* 下拉/选择浮层等 antd 弹层，暗黑下跟随 token 自动变深，无需额外处理。
+   仅补一个全局兜底：表格表头/筛选等写死浅色的场景 */
+.theme-dark .ant-table-filter-trigger {
+  color: var(--text-2);
+}
+
+/* ============================================================
+   二、监控页视觉皮肤（只作用在 .dashboard-* 容器）
+   ============================================================ */
+
+/* --- 2.1 暗黑极简（默认）：直接用全局暗黑变量，无额外效果 --- */
+.dash-minimal {
+  --dash-bg: var(--bg-layout);
+  --dash-card: var(--bg-container);
+  --dash-hl: var(--hl);
+}
+
+/* --- 2.2 HUD 工业风：等宽字 + 角标 + 网格扫描 + 描边面板 --- */
+.dash-hud {
+  --dash-hl: #22d3ee;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Cascadia Code', monospace;
+}
+.dash-hud .ant-card,
+.dash-hud .ant-card-small {
+  background: rgba(17, 22, 29, 0.85) !important;
+  border: 1px solid rgba(34, 211, 238, 0.28) !important;
+  border-radius: 2px !important;
+  position: relative;
+}
+/* HUD 四角角标 */
+.dash-hud .ant-card::before,
+.dash-hud .ant-card::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--dash-hl);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.dash-hud .ant-card::before {
+  top: -1px;
+  left: -1px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.dash-hud .ant-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: 0;
+  border-top: 0;
+}
+.dash-hud .ant-card-head {
+  border-bottom: 1px solid rgba(34, 211, 238, 0.18) !important;
+  background: transparent !important;
+}
+.dash-hud .ant-card-head-title,
+.dash-hud .ant-statistic-title,
+.dash-hud .ant-table-thead > tr > th {
+  color: #8b949e !important;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+.dash-hud .ant-statistic-content {
+  color: var(--dash-hl) !important;
+}
+.dash-hud .ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(34, 211, 238, 0.1) !important;
+}
+.dash-hud .ant-table-tbody > tr:hover > td {
+  background: rgba(34, 211, 238, 0.08) !important;
+}
+.dash-hud .dash-tag-hud {
+  border: 1px solid var(--dash-hl);
+  color: var(--dash-hl);
+  background: transparent !important;
+}
+
+/* --- 2.3 霓虹描边：在暗黑极简基础上叠青色霓虹描边 + 微光 --- */
+.dash-neon .ant-card,
+.dash-neon .ant-card-small {
+  border: 1px solid rgba(34, 211, 238, 0.55) !important;
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.15),
+    0 0 12px rgba(34, 211, 238, 0.22),
+    inset 0 0 8px rgba(34, 211, 238, 0.08);
+}
+.dash-neon .ant-card-head {
+  border-bottom: 1px solid rgba(34, 211, 238, 0.3) !important;
+}
+.dash-neon .ant-statistic-content {
+  color: #22d3ee !important;
+  text-shadow: 0 0 8px rgba(34, 211, 238, 0.55);
+}
+.dash-neon .ant-statistic-title {
+  color: #8b949e !important;
+}
+.dash-neon .ant-table-thead > tr > th {
+  color: #8b949e !important;
+}
+.dash-neon .ant-table-tbody > tr:hover > td {
+  background: rgba(34, 211, 238, 0.1) !important;
+}

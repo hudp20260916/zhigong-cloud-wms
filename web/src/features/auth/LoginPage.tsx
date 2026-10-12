@@ -30,7 +30,7 @@ export default function LoginPage() {
         height: '100%',
         display: 'grid',
         placeItems: 'center',
-        background: 'linear-gradient(180deg,#f5f7fa 0%,#e8eef7 100%)',
+        background: 'var(--login-bg, linear-gradient(180deg,#f5f7fa 0%,#e8eef7 100%))',
       }}
     >
       <Card style={{ width: 380 }} styles={{ body: { padding: 28 } }}>

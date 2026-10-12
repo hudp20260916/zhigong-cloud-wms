@@ -35,7 +35,7 @@ export function DetailTable({
   }
 
   return (
-    <div style={{ background: '#fafafa', borderRadius: 8, padding: '8px 10px', margin: '4px 0' }}>
+    <div style={{ background: 'var(--bg-elevated, #fafafa)', borderRadius: 8, padding: '8px 10px', margin: '4px 0' }}>
       <Table
         size="small"
         rowKey={(_r, i) => String(i)}

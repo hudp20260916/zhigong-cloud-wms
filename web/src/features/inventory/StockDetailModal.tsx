@@ -114,8 +114,8 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
         <button
           onClick={doExport}
           style={{
-            border: '1px solid #d9d9d9',
-            background: '#fff',
+            border: '1px solid var(--border-2, #d9d9d9)',
+            background: 'var(--bg-container, #fff)',
             borderRadius: 6,
             padding: '4px 12px',
             cursor: 'pointer',

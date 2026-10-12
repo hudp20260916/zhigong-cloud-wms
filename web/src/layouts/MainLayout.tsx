@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Button, Drawer, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { Avatar, Button, Drawer, Layout, Menu, Space, Tag, Tooltip, Typography, Switch } from 'antd';
 import {
   AccountBookOutlined,
   AppstoreOutlined,
@@ -9,14 +9,17 @@ import {
   InboxOutlined,
   LogoutOutlined,
   MenuOutlined,
+  MoonOutlined,
   SettingOutlined,
   ShoppingOutlined,
   ShoppingCartOutlined,
+  SunOutlined,
   ToolOutlined,
 } from '@ant-design/icons';
 import { ROLE_LABEL, type Role } from '@shared/permissions';
 import { BRAND_NAME } from '../brand';
 import { useAuthStore } from '../stores/auth';
+import { useThemeStore } from '../stores/theme';
 import { useIsMobile } from '../hooks/useIsMobile';
 
 const { Sider, Header, Content } = Layout;
@@ -140,6 +143,8 @@ export default function MainLayout() {
 
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const themeMode = useThemeStore((s) => s.mode);
+  const setThemeMode = useThemeStore((s) => s.setMode);
 
   const menu = (
     <Menu
@@ -162,6 +167,15 @@ export default function MainLayout() {
       </Avatar>
       <span>{user?.displayName}</span>
       <Tag color="blue">{ROLE_LABEL[(user?.role ?? 'viewer') as Role] ?? user?.role}</Tag>
+      <Tooltip title={themeMode === 'dark' ? '切换为亮色' : '切换为暗黑极简'}>
+        <Switch
+          size="small"
+          checked={themeMode === 'dark'}
+          checkedChildren={<MoonOutlined />}
+          unCheckedChildren={<SunOutlined />}
+          onChange={(checked) => setThemeMode(checked ? 'dark' : 'light')}
+        />
+      </Tooltip>
       <Button
         size="small"
         icon={<LogoutOutlined />}
@@ -179,7 +193,11 @@ export default function MainLayout() {
     <Layout style={{ height: '100%' }}>
       {/* 桌面端保持原样：固定左侧栏；≤768px 收进抽屉，避免侧栏挤压内容宽度 */}
       {!isMobile && (
-        <Sider width={200} theme="light" style={{ borderRight: '1px solid #f0f0f0' }}>
+        <Sider
+          width={200}
+          theme={themeMode === 'dark' ? 'dark' : 'light'}
+          style={{ borderRight: '1px solid var(--border-1, #f0f0f0)' }}
+        >
           <div className="app-logo">
             <FileTextOutlined />
             {BRAND_NAME}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Col, Empty, Row, Space, Statistic, Table, Tag, Typography, message } from 'antd';
+import { Card, Col, Empty, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, message } from 'antd';
 import {
   AlertOutlined,
   ArrowDownOutlined,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { dashboardApi } from '../../api';
 import { useAuthStore } from '../../stores/auth';
+import { useThemeStore, DASHBOARD_STYLE_META, type DashboardStyle } from '../../stores/theme';
 import { ResponsiveTable } from '../../components';
 
 /** 快捷入口：把最常用的建单动作集中到大屏，减少菜单层级跳转 */
@@ -24,6 +25,9 @@ const QUICK_LINKS = [
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const has = useAuthStore((s) => s.has);
+  // 风格需求：监控页可在 暗黑极简 / HUD 工业风 / 霓虹描边 之间切换，只影响本页
+  const dashStyle = useThemeStore((s) => s.dashboard);
+  const setDashStyle = useThemeStore((s) => s.setDashboard);
 
   useEffect(() => {
     dashboardApi
@@ -37,7 +41,30 @@ export default function DashboardPage() {
   const { metrics, todo, todayFlow, trend, alarmTop, canViewPrice } = data;
 
   return (
-    <>
+    <div className={`dash-${dashStyle}`}>
+      <Row justify="end" style={{ marginBottom: 4 }}>
+        <Col>
+          <Space size={8} align="center">
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              视觉风格
+            </Typography.Text>
+            <Segmented
+              size="small"
+              value={dashStyle}
+              onChange={(v) => setDashStyle(v as DashboardStyle)}
+              options={(Object.keys(DASHBOARD_STYLE_META) as DashboardStyle[]).map((k) => ({
+                label: DASHBOARD_STYLE_META[k].label,
+                value: k,
+              }))}
+            />
+            <Tooltip title={DASHBOARD_STYLE_META[dashStyle].desc}>
+              <Tag className="dash-tag-hud" style={{ borderColor: 'var(--dash-hl, #22d3ee)', color: 'var(--dash-hl, #22d3ee)', background: 'transparent' }}>
+                {DASHBOARD_STYLE_META[dashStyle].desc}
+              </Tag>
+            </Tooltip>
+          </Space>
+        </Col>
+      </Row>
       <Row gutter={[12, 12]}>
         <MetricCol label="物料总品类" value={metrics.materialKinds} suffix="种" />
         <MetricCol label="成品库存" value={metrics.productStock} suffix="台" />
@@ -171,7 +198,7 @@ export default function DashboardPage() {
           </Card>
         </Col>
       </Row>
-    </>
+    </div>
   );
 }
 
@@ -233,10 +260,12 @@ function TodoCard({ label, value, path }: { label: string; value: number; path: 
  * 引入图表库会让主包增加 300KB+ 且要处理主题适配；自绘约 60 行且完全可控。
  */
 function TrendChart({ data }: { data: any[] }) {
+  // 风格规范：不用蓝/绿/橙撞色。三档明度的同色系青，靠亮度区分三条 series，
+  // 既避免撞色，深色背景下三档都能看清。
   const series = [
-    { key: 'purchaseIn', label: '采购入库', color: '#1677ff' },
-    { key: 'produceIn', label: '生产入库', color: '#52c41a' },
-    { key: 'saleOut', label: '销售出库', color: '#fa8c16' },
+    { key: 'purchaseIn', label: '采购入库', color: 'var(--dash-hl, #22d3ee)', alpha: 1 },
+    { key: 'produceIn', label: '生产入库', color: 'var(--dash-hl, #22d3ee)', alpha: 0.62 },
+    { key: 'saleOut', label: '销售出库', color: 'var(--dash-hl, #22d3ee)', alpha: 0.34 },
   ];
 
   const max = Math.max(
@@ -272,11 +301,12 @@ function TrendChart({ data }: { data: any[] }) {
                     width={barW * 0.9}
                     height={Math.max(h, v > 0 ? 0.6 : 0)}
                     fill={s.color}
+                    opacity={(s as any).alpha}
                     rx={0.4}
                   />
                 );
               })}
-              <text x={i * groupW + groupW / 2} y={H + 7} fontSize={3} textAnchor="middle" fill="#888">
+              <text x={i * groupW + groupW / 2} y={H + 7} fontSize={3} textAnchor="middle" fill="var(--text-3, #6e7681)">
                 {d.label}
               </text>
             </g>
@@ -288,7 +318,14 @@ function TrendChart({ data }: { data: any[] }) {
         {series.map((s) => (
           <Space key={s.key} size={6}>
             <span
-              style={{ display: 'inline-block', width: 10, height: 10, background: s.color, borderRadius: 2 }}
+              style={{
+                display: 'inline-block',
+                width: 10,
+                height: 10,
+                background: s.color,
+                opacity: (s as any).alpha,
+                borderRadius: 2,
+              }}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {s.label} {data.reduce((a, d) => a + Number(d[s.key] ?? 0), 0)}
