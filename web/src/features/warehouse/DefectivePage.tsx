@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tag, message } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import { archiveApi, warehouseApi } from '../../api';
+import { archiveApi, productionApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode, FilterBar } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -15,14 +15,20 @@ const REASONS = ['来料不良', '制程损坏', '仓储破损', '过期失效',
 export default function DefectivePage() {
   const { list, total, loading, params, patchParams, reload } = useList<any>((p) => warehouseApi.defectives(p));
   const [materials, setMaterials] = useState<any[]>([]);
+  const [issues, setIssues] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [outDate, setOutDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  const [sourceType, setSourceType] = useState<'manual' | 'issue'>('manual');
+  const [issueId, setIssueId] = useState<number | undefined>();
+  const [issueInfo, setIssueInfo] = useState<any>(null);
+  const [produceQty, setProduceQty] = useState<number>(0);
   const location = useLocation();
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
+    productionApi.issues({ pageSize: 300 }).then((r) => setIssues(r.list.filter((i: any) => i.status === '有效'))).catch(() => undefined);
   }, []);
 
   // 需求 22：从库存预警看板「呆滞库存 → 不良品处理」跳过来时，自动带出该物料并打开新增弹窗
@@ -39,15 +45,61 @@ export default function DefectivePage() {
     setOpen(true);
   }, [location.state, materials]);
 
+  /** 切到「生产领料」来源：带出该领料单可退明细（原路原量），填入不良品明细 */
+  async function pickIssue(id: number | undefined) {
+    setIssueId(id);
+    setIssueInfo(null);
+    setProduceQty(0);
+    if (!id) {
+      setItems([]);
+      return;
+    }
+    try {
+      const d = await productionApi.returnableOf(id);
+      setIssueInfo(d.issue);
+      setItems(
+        (d.items ?? []).map((it: any) => ({
+          key: String(it.src_item_id ?? it.material_id),
+          materialId: it.material_id,
+          qty: 0,
+          reason: '制程损坏',
+          stock: it.remainQty,
+        })),
+      );
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
+
   async function submit() {
     const lines = items.filter((i) => i.materialId && i.qty > 0);
     if (lines.length === 0) return message.warning('请至少录入一条不良品明细');
+    if (sourceType === 'issue' && !issueId) return message.warning('请选择来源领料单');
+    if (sourceType === 'issue' && !(produceQty >= 0)) return message.warning('请填写对应成品数量（可为 0）');
     try {
-      await warehouseApi.createDefective({ outDate, remark, items: lines });
-      message.success('不良品出库单已生成，物料库存已扣减');
+      await warehouseApi.createDefective({
+        outDate,
+        remark,
+        sourceType,
+        issueId: sourceType === 'issue' ? issueId : undefined,
+        produceQty: sourceType === 'issue' ? produceQty : 0,
+        items: lines,
+      });
+      message.success(sourceType === 'issue' ? '不良品出库单已生成（领料来源），物料库存已扣减，工单可入库余量已联动' : '不良品出库单已生成，物料库存已扣减');
       setOpen(false);
       reload();
     } catch (e: any) { message.error(e.message); }
+  }
+
+  function openCreate() {
+    setItems([]);
+    setOutDate(today());
+    setRemark('');
+    setSourceType('manual');
+    setIssueId(undefined);
+    setIssueInfo(null);
+    setProduceQty(0);
+    setOpen(true);
   }
 
   return (
@@ -68,7 +120,7 @@ export default function DefectivePage() {
             ], res.list ?? []);
           }}>导出</Button>
           <PermGate permission="warehouse.defective.create">
-            <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setOutDate(today()); setRemark(''); setOpen(true); }}>新增不良品出库</DockAction>
+            <DockAction icon={<PlusOutlined />} onClick={openCreate}>新增不良品出库</DockAction>
           </PermGate>
         </Space>
       }
@@ -101,16 +153,18 @@ export default function DefectivePage() {
         size="small"
         loading={loading}
         dataSource={list}
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
           { title: '出库单号', dataIndex: 'out_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '出库日期', dataIndex: 'out_date', width: 110 },
+          { title: '来源', dataIndex: 'sourceLabel', width: 200, ellipsis: true, render: (v, r) => r.source_type === 'issue' ? <Tag color="orange">领料来源 {r.source_issue_no ?? ''}</Tag> : <Tag>手工拣选</Tag> },
+          { title: '对应成品量', dataIndex: 'produce_qty', width: 110, className: 'mono', render: (v, r) => r.source_type === 'issue' ? <span style={{ color: '#fa8c16' }}>{v}</span> : '-' },
           { title: '出库内容', dataIndex: 'content', ellipsis: true },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
           { title: '操作', width: 90, render: (_, r) => r.canUndo ? (
-            <Popconfirm title="确认撤销？" onConfirm={async () => {
+            <Popconfirm title="确认撤销？" description={r.source_type === 'issue' ? '撤销后物料库存回补，工单可入库余量随之恢复' : undefined} onConfirm={async () => {
               try { await warehouseApi.undoDefective(r.id); message.success('已撤销'); reload(); }
               catch (e: any) { message.error(e.message); }
             }}>
@@ -120,29 +174,83 @@ export default function DefectivePage() {
         ]}
       />
 
-      <Modal open={open} title="新增不良品出库" onCancel={() => setOpen(false)} onOk={submit} width={860} destroyOnClose>
+      <Modal open={open} title="新增不良品出库" onCancel={() => setOpen(false)} onOk={submit} width={880} destroyOnClose>
         <Space wrap style={{ marginBottom: 12 }}>
+          <Radio.Group value={sourceType} onChange={(e) => {
+            const v = e.target.value;
+            setSourceType(v);
+            setIssueId(undefined);
+            setIssueInfo(null);
+            setItems([]);
+          }}>
+            <Radio.Button value="manual">手工拣选</Radio.Button>
+            <Radio.Button value="issue">生产领料来源</Radio.Button>
+          </Radio.Group>
           <DatePicker value={dayVal(outDate)} onChange={(d) => setOutDate(d ? d.format('YYYY-MM-DD') : today())} />
-          <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, reason: '' }])}>添加明细</Button>
         </Space>
-        <ResponsiveTable size="small" rowKey="key" dataSource={items} pagination={false} scroll={{ y: 260 }} columns={[
+
+        {sourceType === 'issue' && (
+          <Space wrap style={{ marginBottom: 12 }}>
+            <Select
+              style={{ width: 420 }}
+              placeholder="选择来源生产领料单"
+              showSearch
+              optionFilterProp="label"
+              value={issueId}
+              onChange={pickIssue}
+              options={issues.map((o) => ({
+                value: o.id,
+                label: `${o.issue_no} · ${o.productName ?? ''} · 领料 ${o.produce_qty} · 已入 ${o.received_qty ?? 0}`,
+              }))}
+            />
+            {issueInfo && (
+              <Alert
+                type="success"
+                showIcon
+                message={`来源领料单 ${issueInfo.issue_no}（工单 ${issueInfo.wo_no}），已带出该单可退物料明细，数量默认 0，请按需填写`}
+              />
+            )}
+          </Space>
+        )}
+
+        {sourceType === 'issue' && issueInfo && (
+          <Space wrap style={{ marginBottom: 12 }}>
+            <span style={{ color: '#8c8c8c', fontSize: 12 }}>对应成品数量（台/件，从工单可入库余量中核减）</span>
+            <InputNumber
+              min={0}
+              max={Number(issueInfo.produce_qty) || undefined}
+              value={produceQty}
+              onChange={(v) => setProduceQty(Number(v ?? 0))}
+              style={{ width: 140 }}
+            />
+            <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+              填写后该工单「可入库余量」自动收敛，实际合格产能随之减少
+            </span>
+          </Space>
+        )}
+
+        {sourceType === 'manual' && (
+          <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, reason: '' }])}>添加明细</Button>
+        )}
+
+        <ResponsiveTable size="small" rowKey="key" dataSource={items} pagination={false} scroll={{ y: 260 }} locale={{ emptyText: sourceType === 'issue' ? '请先选择来源领料单' : '请点击「添加明细」' }} columns={[
           { title: '不良物料', dataIndex: 'materialId', render: (v, r) => (
-            <Select style={{ width: '100%' }} value={v} showSearch optionFilterProp="label"
+            <Select style={{ width: '100%' }} value={v} showSearch optionFilterProp="label" disabled={sourceType === 'issue'}
               options={materials.map((m) => ({ value: m.id, label: `${m.code} ${m.name}` }))}
               onChange={(nv) => { const m = materials.find((x) => x.id === nv); setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, materialId: nv, stock: m?.current_stock } : x))); }} />
           ) },
-          { title: '可用库存', dataIndex: 'stock', width: 100, className: 'mono', render: (v) => v ?? '-' },
+          { title: '可退/可用', dataIndex: 'stock', width: 100, className: 'mono', render: (v) => v ?? '-' },
           { title: '数量', dataIndex: 'qty', width: 110, render: (v, r) => (
-            <InputNumber min={0} value={v} style={{ width: '100%' }} onChange={(nv) => setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, qty: Number(nv ?? 0) } : x)))} />
+            <InputNumber min={0} max={r.stock ? Number(r.stock) : undefined} value={v} style={{ width: '100%' }} onChange={(nv) => setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, qty: Number(nv ?? 0) } : x)))} />
           ) },
           { title: '原因', dataIndex: 'reason', width: 160, render: (v, r) => (
             <Select style={{ width: '100%' }} value={v || undefined} placeholder="选择原因"
               options={REASONS.map((x) => ({ value: x, label: x }))}
               onChange={(nv) => setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, reason: nv } : x)))} />
           ) },
-          { title: '操作', width: 70, render: (_, r) => (
+          { title: '操作', width: 70, render: (_, r) => sourceType === 'manual' ? (
             <Button type="link" size="small" danger onClick={() => setItems((prev) => prev.filter((x) => x.key !== r.key))}>移除</Button>
-          ) },
+          ) : null },
         ]} />
         <Input.TextArea rows={2} style={{ marginTop: 12 }} placeholder="备注" value={remark} onChange={(e) => setRemark(e.target.value)} />
       </Modal>

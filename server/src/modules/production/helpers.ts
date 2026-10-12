@@ -107,11 +107,32 @@ export function returnedQtyOf(woId: number): number {
 }
 
 /**
+ * 累计「领料来源」不良品出库量（按对应成品数量，从可入库产能中核减）。
+ *
+ * 口径说明：只有 source_type='issue' 的不良品出库才联动工单产能——
+ * 它代表这批料已领、投产中识别为不良，不能计入合格产出；
+ * 手工拣选（source_type='manual'）不联动，它本就是坏料移出库存。
+ * 这样「领 100、退 0、不良 2」后可入库余量收敛到 98，账实一致。
+ */
+export function defectiveOutQtyOf(woId: number): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(do.produce_qty), 0) AS s
+         FROM defective_outs do
+         JOIN material_issues i ON i.id = do.issue_id
+        WHERE i.wo_id = ? AND do.source_type = 'issue' AND do.status = '有效'`,
+    )
+    .get(woId) as { s: number };
+  return Number(row.s);
+}
+
+/**
  * 重算工单领料/入库合计与状态。
  *
- * 领料产量口径 = 累计有效领料 - 累计有效退料：
- * 退料代表「领了但没投产、已原路退回」的部分，必须从可入库产能中扣除，
- * 否则工单 100 计划、退 2 台料后仍能入库 100，账实不符。
+ * 可入库产能口径 = 累计有效领料 − 累计有效退料 − 领料来源不良品出库：
+ *  - 退料：领了但没投产、已原路退回；
+ *  - 领料来源不良品出库：投产后识别为不良，不能计入合格产出。
+ * 两者都要从可入库产能中扣除，否则领 100、退 2（其中不良 1）后仍能入库 100，账实不符。
  */
 export function refreshWorkOrder(woId: number): void {
   const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(woId) as any;
@@ -119,7 +140,8 @@ export function refreshWorkOrder(woId: number): void {
 
   const issuedGross = issuedQtyOf(woId);
   const returned = returnedQtyOf(woId);
-  const issued = Math.max(0, issuedGross - returned);
+  const defectiveOut = defectiveOutQtyOf(woId);
+  const issued = Math.max(0, issuedGross - returned - defectiveOut);
   const receivedRow = db
     .prepare(
       `SELECT COALESCE(SUM(i.qty), 0) AS s

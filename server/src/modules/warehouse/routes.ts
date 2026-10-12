@@ -12,7 +12,7 @@ import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
-import { cartonQtyOf } from '../production/helpers.js';
+import { cartonQtyOf, refreshWorkOrder } from '../production/helpers.js';
 import { alertConfig } from '../system/settings.js';
 
 export const warehouseRouter = Router();
@@ -23,6 +23,8 @@ const materialItem = z.object({
   price: z.number().min(0).default(0),
   reason: z.string().trim().optional().default(''),
 });
+
+/** 不良品出库来源：manual=手工拣选（原有）/ issue=生产领料后识别的不良品退回 */
 
 // ---------------- 物料销售 ----------------
 
@@ -160,6 +162,9 @@ warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req
   const materialKeyword = String(req.query.materialKeyword ?? '').trim();
   const dateFrom = String(req.query.dateFrom ?? '').trim();
   const dateTo = String(req.query.dateTo ?? '').trim();
+  // 领料溯源筛选：sourceType='issue' 时按来源领料单 id 精确查
+  const sourceType = String(req.query.sourceType ?? '').trim();
+  const issueIdQ = Number(req.query.issueId ?? 0) || 0;
 
   const cond: string[] = ['1=1'];
   const params: any[] = [];
@@ -182,15 +187,27 @@ warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req
     );
     params.push(`%${materialKeyword}%`, `%${materialKeyword}%`);
   }
+  if (sourceType) {
+    cond.push(`d.source_type = ?`);
+    params.push(sourceType);
+  }
+  if (issueIdQ) {
+    cond.push(`d.issue_id = ?`);
+    params.push(issueIdQ);
+  }
   const where = cond.join(' AND ');
 
   const rows = db
     .prepare(
-      `SELECT d.*, u.display_name AS operator_name,
-              (SELECT IFNULL(GROUP_CONCAT(m.name || '×' || i.qty, '、'), '')
-                 FROM defective_out_items i JOIN materials m ON m.id = i.material_id
-                WHERE i.out_id = d.id) AS content
-         FROM defective_outs d LEFT JOIN users u ON u.id = d.operator_id
+      `SELECT d.*, i.issue_no AS source_issue_no, w.wo_no AS source_wo_no,
+              u.display_name AS operator_name,
+              (SELECT IFNULL(GROUP_CONCAT(m.name || '×' || i2.qty, '、'), '')
+                 FROM defective_out_items i2 JOIN materials m ON m.id = i2.material_id
+                WHERE i2.out_id = d.id) AS content
+         FROM defective_outs d
+         LEFT JOIN users u ON u.id = d.operator_id
+         LEFT JOIN material_issues i ON i.id = d.issue_id
+         LEFT JOIN work_orders w ON w.id = i.wo_id
         WHERE ${where}
         ORDER BY d.id DESC LIMIT ? OFFSET ?`,
     )
@@ -200,9 +217,15 @@ warehouseRouter.get('/defectives', requirePerm('warehouse.defective.view'), (req
     res,
     maskList(rows, { canViewPrice: canViewPrice(ctx) }).map((r: any) => ({
       ...r,
+      sourceLabel:
+        r.source_type === 'issue' ? `领料来源 ${r.source_issue_no ?? ''} · ${r.source_wo_no ?? ''}` : '手工拣选',
       canUndo: ctx.permissions.includes('warehouse.defective.create') && r.status === DOC_STATUS.VALID,
     })),
-    countRows(`defective_outs d LEFT JOIN users u ON u.id = d.operator_id`, where, params),
+    countRows(
+      `defective_outs d LEFT JOIN users u ON u.id = d.operator_id`,
+      where,
+      params,
+    ),
   );
 });
 
@@ -210,6 +233,10 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
   const parsed = z
     .object({
       outDate: z.string().min(1, '请选择出库日期'),
+      sourceType: z.enum(['manual', 'issue']).default('manual'),
+      issueId: z.number().int().positive('请选择来源领料单').optional(),
+      /** 领料来源时：本单不良品对应的成品数量（台/件），从工单可入库余量中核减 */
+      produceQty: z.number().min(0).default(0),
       items: z.array(materialItem).min(1, '请至少录入一条不良品明细'),
       remark: z.string().trim().optional().default(''),
     })
@@ -217,13 +244,95 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
   if (!parsed.success) throw Err.badRequest(parsed.error.issues[0].message);
   const d = parsed.data;
 
+  // 领料来源校验：必须挂在有效领料单上，出库数量不得超过该物料在该领料单的可退量
+  let issue: any = null;
+  let issueReturnable: Map<number, { materialId: number; name: string; issuedQty: number; returnedQty: number; remainQty: number }> | null = null;
+  if (d.sourceType === 'issue') {
+    if (!d.issueId) throw Err.badRequest('选择「生产领料」来源时必须关联一张领料单');
+    issue = db.prepare(`SELECT * FROM material_issues WHERE id = ?`).get(d.issueId) as any;
+    if (!issue) throw Err.notFound('来源领料单不存在');
+    if (issue.status !== DOC_STATUS.VALID) throw Err.conflict('来源领料单已撤销，不能作为不良品出库来源');
+
+    // 可退量 = 原领料量 - 累计有效退料量（按源领料明细回溯）
+    const rows = db
+      .prepare(
+        `SELECT ii.material_id, ii.qty AS issued_qty, m.name,
+                IFNULL((SELECT SUM(ri.qty) FROM material_return_items ri
+                          JOIN material_returns r ON r.id = ri.return_id
+                         WHERE ri.src_item_id = ii.id AND r.status = '有效'), 0) AS returned_qty
+           FROM material_issue_items ii
+           JOIN materials m ON m.id = ii.material_id
+          WHERE ii.issue_id = ?`,
+      )
+      .all(d.issueId) as any[];
+    issueReturnable = new Map(
+      rows.map((r: any) => [
+        r.material_id,
+        {
+          materialId: r.material_id,
+          name: r.name,
+          issuedQty: Number(r.issued_qty),
+          returnedQty: Number(r.returned_qty),
+          remainQty: Number(r.issued_qty) - Number(r.returned_qty),
+        },
+      ]),
+    );
+
+    // 对应成品数量不得超过该领料单「剩余可退成品量」
+    // = 领料产量 − 已退良品 − 已退不良 − 已入库（已入库是合格产出，不能再被不良品占走）
+    const woForCap = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(issue.wo_id) as any;
+    const issuedThis = Number(issue.produce_qty);
+    const alreadyReturned = Number(
+      (db.prepare(`SELECT COALESCE(SUM(return_qty), 0) AS s FROM material_returns WHERE wo_id = ? AND status = '有效'`).get(issue.wo_id) as { s: number }).s,
+    );
+    const alreadyDefective = Number(
+      (db.prepare(
+        `SELECT COALESCE(SUM(do.produce_qty), 0) AS s FROM defective_outs do WHERE do.issue_id = ? AND do.source_type = 'issue' AND do.status = '有效'`,
+      ).get(d.issueId) as { s: number }).s,
+    );
+    const alreadyReceived = Number(woForCap?.received_qty ?? 0);
+    const maxProduce = Math.max(0, issuedThis - alreadyReturned - alreadyDefective - alreadyReceived);
+    if (d.produceQty > maxProduce + 1e-6) {
+      throw Err.conflict(
+        `对应成品数量 ${d.produceQty} 超过该领料单剩余可退成品量 ${maxProduce}（领料 ${issuedThis} − 已退良品 ${alreadyReturned} − 已退不良 ${alreadyDefective} − 已入库 ${alreadyReceived}），请检查`,
+      );
+    }
+  }
+
   const id = tx(() => {
     const outNo = nextCode('defectiveOut', d.outDate);
+
+    // 领料来源：逐条校验数量 ≤ 可退量，且物料必须属于该领料单
+    if (issue && issueReturnable) {
+      for (const it of d.items) {
+        const avail = issueReturnable.get(it.materialId);
+        if (!avail) {
+          throw Err.conflict(`物料 #${it.materialId} 不属于来源领料单，无法按领料来源出库`);
+        }
+        if (it.qty > avail.remainQty + 1e-6) {
+          throw Err.conflict(
+            `物料「${avail.name}」出库量 ${it.qty} 超过可退量 ${avail.remainQty}（原领 ${avail.issuedQty ?? '—'}，已退部分已扣除）`,
+          );
+        }
+      }
+    }
+
     const info = db
       .prepare(
-        `INSERT INTO defective_outs (out_no, out_date, status, operator_id, remark, created_at) VALUES (?,?,?,?,?,?)`,
+        `INSERT INTO defective_outs (out_no, out_date, status, operator_id, remark, created_at, source_type, issue_id, produce_qty)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
-      .run(outNo, d.outDate, DOC_STATUS.VALID, req.ctx!.userId, d.remark, nowIso());
+      .run(
+        outNo,
+        d.outDate,
+        DOC_STATUS.VALID,
+        req.ctx!.userId,
+        d.remark,
+        nowIso(),
+        d.sourceType,
+        d.sourceType === 'issue' ? d.issueId : null,
+        d.sourceType === 'issue' ? d.produceQty : 0,
+      );
     const outId = Number(info.lastInsertRowid);
     const ins = db.prepare(`INSERT INTO defective_out_items (out_id, material_id, qty, reason) VALUES (?,?,?,?)`);
     for (const it of d.items) ins.run(outId, it.materialId, it.qty, it.reason);
@@ -240,12 +349,24 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
         operatorId: req.ctx!.userId,
       })),
     );
+
+    // 领料来源：物料已扣出正常库存，对应成品数量需从工单可入库余量中核减
+    if (d.sourceType === 'issue' && d.produceQty > 0 && issue) {
+      refreshWorkOrder(issue.wo_id);
+    }
+
     writeLog({
       operatorId: req.ctx!.userId,
-      action: '不良品出库',
+      action: d.sourceType === 'issue' ? '不良品出库（领料来源）' : '不良品出库',
       targetType: 'defective_out',
       targetId: outId,
-      detail: { outNo, count: d.items.length },
+      detail: {
+        outNo,
+        sourceType: d.sourceType,
+        issueId: d.sourceType === 'issue' ? d.issueId : null,
+        produceQty: d.sourceType === 'issue' ? d.produceQty : 0,
+        count: d.items.length,
+      },
     });
     return outId;
   });
@@ -260,6 +381,11 @@ warehouseRouter.post('/defectives/:id/undo', requirePerm('warehouse.defective.cr
     if (d.status !== DOC_STATUS.VALID) throw Err.conflict('该单据已撤销');
     reverseStock('不良品出库', id, req.ctx!.userId);
     db.prepare(`UPDATE defective_outs SET status = ? WHERE id = ?`).run(DOC_STATUS.CANCELLED, id);
+    // 领料来源撤销：物料库存回补后，该领料单对应工单的「可入库余量」随之恢复
+    if (d.source_type === 'issue' && d.issue_id) {
+      const iss = db.prepare(`SELECT wo_id FROM material_issues WHERE id = ?`).get(d.issue_id) as any;
+      if (iss?.wo_id) refreshWorkOrder(iss.wo_id);
+    }
     writeLog({ operatorId: req.ctx!.userId, action: '撤销不良品出库', targetType: 'defective_out', targetId: id });
   });
   ok(res, { id });
