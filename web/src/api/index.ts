@@ -99,6 +99,10 @@ export const productionApi = {
   issueDetail: (id: number) => api.get<any>(`/production/issues/${id}`),
   forReceiptByIssue: (id: number) => api.get<any>(`/production/issues/${id}/for-receipt`),
   createIssue: (b: any) => api.post<{ id: number }>('/production/issues', b),
+  issueCeiling: (woId: number) =>
+    api.get<{ woId: number; planQty: number; issuedNet: number; ceiling: number }>(
+      `/production/issues/ceiling/${woId}`,
+    ),
   undoIssue: (id: number) => api.post<{ id: number }>(`/production/issues/${id}/undo`),
 
   // 生产退料：按原领料单原量退回（计划 100 实产 98 场景）

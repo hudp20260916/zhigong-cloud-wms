@@ -95,6 +95,23 @@ export function issuedQtyOf(woId: number): number {
   return Number(row.s);
 }
 
+/**
+ * 工单「可领上限」= 计划量 − 累计有效领料 − 累计有效退料 − 领料来源不良品出库。
+ * 与可入库产能口径（refreshWorkOrder 的 issued）同源，三者都是「领了不会再变合格成品」的核减项。
+ * 领料量累计不得超过计划量，超量领料会在源头被拦，从而杜绝 issued>plan、损耗虚高、入库报错。
+ * 返回 ≤0 表示已领满 / 已超，不可再领。
+ */
+export function issuableCeiling(woId: number): number {
+  const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(woId) as any;
+  if (!wo) return 0;
+  const plan = Number(wo.plan_qty) || 0;
+  const issuedGross = issuedQtyOf(woId);
+  const returned = returnedQtyOf(woId);
+  const defectiveOut = defectiveOutQtyOf(woId);
+  const issued = Math.max(0, issuedGross - returned - defectiveOut);
+  return Math.max(0, plan - issued);
+}
+
 /** 累计有效退料产量（退回已领未用的部分，从领料产量中核减） */
 export function returnedQtyOf(woId: number): number {
   const row = db
@@ -152,15 +169,17 @@ export function refreshWorkOrder(woId: number): void {
     .get(woId, wo.product_id) as { s: number };
   const received = Number(receivedRow.s);
 
+  // 损耗 = 累计领料净量 − 累计入库量（投产损耗口径）。
+  // 因领料入口已做「累计领料 ≤ 计划量」上限校验（issuableCeiling），
+  // issued 永远 ≤ plan，超量领料无法进入本计算，损耗不会因超领虚高。
   const loss = Math.max(0, issued - received);
+  // 完工判定：入库量 ≥ 计划量即判已完工（不要求领料；「直接扣料/不扣料」入库同样计满计划）。
   const status =
-    received >= Number(wo.plan_qty) && Number(wo.plan_qty) > 0
+    Number(wo.plan_qty) > 0 && received >= Number(wo.plan_qty)
       ? '已完工'
-      : issued > 0
+      : issued > 0 || received > 0
         ? '生产中'
-        : received > 0
-          ? '生产中'
-          : '未开工';
+        : '未开工';
 
   db.prepare(
     `UPDATE work_orders SET issued_qty = ?, received_qty = ?, loss_qty = ?, status = ?, updated_at = ?

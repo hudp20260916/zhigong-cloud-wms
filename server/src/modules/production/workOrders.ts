@@ -76,13 +76,17 @@ workOrderRouter.get('/', requirePerm('production.wo.view'), (req, res) => {
   const ctx = req.ctx!;
   const canReceive = ctx.permissions.includes('production.receipt.create');
 
-  // 需求 4.6：工单列表「去入库」仅对未领料工单开放；已全部入库自动隐藏
+  // 需求 4.6 + 完工口径修正：「去入库」统一按「计划尚未入库满」(remain = plan - received > 0) 判定，
+  // 不再要求 issued_qty === 0。完工 = 实际入库量 == 计划量（不要求领料）；
+  // 「不领料直接入库」的单满量后 remain=0 自动隐藏，领了部分料但未满量的 remain>0 仍开放，
+  // 与前端「去领料」按钮同读 remain，避免两按钮同口径不同判。
+  // 注：去领料/去入库按钮是否可点仍由前端各自判定；后端在此处只保留「可入库余量>0」的硬门槛。
   const list = rows.map((r) => {
     const remain = Math.max(0, Number(r.plan_qty) - Number(r.received_qty));
     return {
       ...r,
       remainQty: remain,
-      canReceive: canReceive && Number(r.issued_qty) === 0 && remain > 0,
+      canReceive: canReceive && remain > 0,
       canEdit:
         ctx.permissions.includes('production.wo.update') &&
         Number(r.issued_qty) === 0 &&

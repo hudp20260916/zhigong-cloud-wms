@@ -17,7 +17,14 @@ export const db = new Database(config.dbFile);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-/** 执行迁移（按文件名排序，只执行一次） */
+/**
+ * 执行迁移（按文件名排序，只执行一次）。
+ *
+ * 幂等性由 _migrations 表保证：每个 .sql 文件只跑一次。
+ * 老库升级时，若某表的 ALTER ADD COLUMN 在列已存在会报 duplicate column——
+ * 由各迁移文件自身的「注释 + 顺序」管理；框架不额外插一层补列逻辑，
+ * 避免"新库建表前补列→表不存在"的时序坑（defective_outs 缺 issue_id 事故根因）。
+ */
 export function migrate(): void {
   const dir = path.join(config.serverRoot, 'src/db');
   const files = fs

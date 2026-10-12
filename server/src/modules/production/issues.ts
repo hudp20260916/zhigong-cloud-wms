@@ -12,7 +12,15 @@ import { canViewPrice } from '../../middleware/context.js';
 import { maskList } from '../../core/serializer.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
-import { availableToReceive, cartonQtyOf, refreshWorkOrder } from './helpers.js';
+import {
+  availableToReceive,
+  cartonQtyOf,
+  defectiveOutQtyOf,
+  issuedQtyOf,
+  issuableCeiling,
+  returnedQtyOf,
+  refreshWorkOrder,
+} from './helpers.js';
 
 export const issueRouter = Router();
 
@@ -28,6 +36,21 @@ const schema = z.object({
 });
 
 /** 领料列表：新增「主产品名称」列（需求 3.5.2） */
+/** 领料上限：某工单还能领多少（用于前端提示与拦截）。需求：领料超限被正确阻止。 */
+issueRouter.get('/ceiling/:woId', requirePerm('production.issue.view'), (req, res) => {
+  const woId = Number(req.params.woId);
+  const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(woId) as any;
+  if (!wo) throw Err.notFound('生产工单不存在');
+  const issuedNet = Math.max(0, issuedQtyOf(woId) - returnedQtyOf(woId) - defectiveOutQtyOf(woId));
+  const plan = Number(wo.plan_qty) || 0;
+  ok(res, {
+    woId,
+    planQty: plan,
+    issuedNet,
+    ceiling: Math.max(0, plan - issuedNet),
+  });
+});
+
 issueRouter.get('/', requirePerm('production.issue.view'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
   // 需求 10：筛选结果优化 —— 增加日期区间、物料包含字
@@ -163,6 +186,22 @@ issueRouter.post('/', requirePerm('production.issue.create'), (req, res) => {
     if (!wo) throw Err.notFound('生产工单不存在');
     const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(wo.product_id) as any;
     if (!product) throw Err.notFound('工单关联的主产品不存在');
+
+    // 超量领料拦截：本单生产数量 + 已领净量（已扣退料/不良核减）不得超过工单计划量。
+    // 这是「无限领料 + 损耗虚高 + 入库报错」三异常的源头，必须在领料入口先卡住。
+    const ceiling = issuableCeiling(d.woId);
+    if (ceiling <= 0) {
+      throw Err.conflict(
+        `工单 ${wo.wo_no} 可领上限已为 0（计划 ${Number(wo.plan_qty)}，已领足或已超），无法继续领料`,
+      );
+    }
+    if (Number(d.produceQty) > ceiling + 1e-9) {
+      throw Err.conflict(
+        `超量领料：本单生产数量 ${Number(d.produceQty)} 超过可领上限 ${ceiling}（工单 ${wo.wo_no} 计划 ${Number(
+          wo.plan_qty,
+        )}，已领 ${Math.max(0, Number(wo.plan_qty) - ceiling)}）`,
+      );
+    }
 
     // 未显式指定明细时按 BOM 展开（含虚拟件穿透）并追加外箱
     const requirement = new Map<number, number>();

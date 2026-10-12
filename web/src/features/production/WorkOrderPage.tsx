@@ -219,10 +219,11 @@ export default function WorkOrderPage() {
                     去入库
                   </Button>
                 )}
-                {/* 需求 9：只要「实际领料合计 < 计划产量」就继续开放去领料。
-                    原写法是 issued_qty === 0，导致领过一次料（哪怕远少于计划）按钮就消失，
-                    剩下的料再也领不了。 */}
-                {Number(r.issued_qty ?? 0) < Number(r.plan_qty ?? 0) && (
+                {/* 去领料/去入库 统一按「计划尚未入库满」判定（remain = plan - received > 0）。
+                    完工口径 = 实际入库量 == 计划量，不要求领料；因此对「不领料直接入库」的工单，
+                    满量后 remain=0，两按钮一起隐藏，不会把合法满量单误判成"未领料算未完工"。
+                    需求 9：领了部分料但还没入库满 → remain>0，去领料仍亮，可继续领剩下的料。 */}
+                {Number(r.remainQty ?? 0) > 0 && (
                   <Button
                     type="link"
                     size="small"

@@ -49,6 +49,11 @@ export default function IssuePage() {
   const [issueDate, setIssueDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
+  // 领料上限：选中工单后拉取可领上限，用于前端提示与拦截
+  const [ceiling, setCeiling] = useState<{ planQty: number; issuedNet: number; ceiling: number } | null>(
+    null,
+  );
+  const [ceilingLoading, setCeilingLoading] = useState(false);
 
   useEffect(() => {
     productionApi
@@ -68,9 +73,31 @@ export default function IssuePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
+  // 选中工单后拉取该工单可领上限（计划量、已领净量、可领上限）
+  useEffect(() => {
+    if (!woId) {
+      setCeiling(null);
+      return;
+    }
+    setCeilingLoading(true);
+    productionApi
+      .issueCeiling(woId)
+      .then(setCeiling)
+      .catch(() => setCeiling(null))
+      .finally(() => setCeilingLoading(false));
+  }, [woId]);
+
   async function submit() {
     if (!woId) {
       message.warning('请选择生产工单');
+      return;
+    }
+    // 前端拦截：超过可领上限直接不让提交（后端另有强制校验兜底）
+    if (ceiling && produceQty > ceiling.ceiling + 1e-9) {
+      message.error(
+        `超量领料：本单生产数量 ${produceQty} 超过可领上限 ${ceiling.ceiling}` +
+          `（工单计划 ${ceiling.planQty}，已领 ${ceiling.issuedNet}）`,
+      );
       return;
     }
     setSaving(true);
@@ -294,8 +321,27 @@ export default function IssuePage() {
               }))}
             />
           </Form.Item>
-          <Form.Item label="生产数量（本单可生产成品数）">
-            <InputNumber min={1} value={produceQty} onChange={(v) => setProduceQty(Number(v ?? 0))} style={{ width: '100%' }} />
+          <Form.Item
+            label="生产数量（本单可生产成品数）"
+            extra={
+              ceiling ? (
+                <div style={{ color: ceiling.ceiling > 0 ? '#3B6D11' : '#cf1322' }}>
+                  {ceiling.ceiling > 0
+                    ? `可领上限 ${ceiling.ceiling}（计划 ${ceiling.planQty}，已领 ${ceiling.issuedNet}）`
+                    : `该工单可领上限为 0（计划 ${ceiling.planQty}，已领 ${ceiling.issuedNet}），无法再领料`}
+                </div>
+              ) : ceilingLoading ? (
+                <div style={{ color: '#8c8c8c' }}>正在计算可领上限…</div>
+              ) : null
+            }
+          >
+            <InputNumber
+              min={1}
+              max={ceiling?.ceiling || undefined}
+              value={produceQty}
+              onChange={(v) => setProduceQty(Number(v ?? 0))}
+              style={{ width: '100%' }}
+            />
           </Form.Item>
           <Form.Item label="领料日期">
             <DatePicker
