@@ -75,6 +75,14 @@ export default function PurchaseReceiptPage() {
   /** OCR 识别请求号：随建单一起提交，便于回写 ocr_logs 统计采纳率 */
   const [ocrRequestId, setOcrRequestId] = useState<string | undefined>();
 
+  // 需求：物料单价允许 0、价格后补——补录/修改已入库单据单价
+  const [repriceOpen, setRepriceOpen] = useState(false);
+  const [repriceId, setRepriceId] = useState<number | null>(null);
+  const [repriceNo, setRepriceNo] = useState('');
+  const [repriceItems, setRepriceItems] = useState<any[]>([]);
+  const [repricePrices, setRepricePrices] = useState<Record<number, number | string>>({});
+  const [repriceSaving, setRepriceSaving] = useState(false);
+
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
     archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
@@ -194,6 +202,44 @@ export default function PurchaseReceiptPage() {
     }
   }
 
+  /** 打开补录单价弹窗：载入该单明细，默认带出当前单价（允许改为 0 或真实价） */
+  async function openReprice(r: any) {
+    try {
+      const res = await purchaseApi.receiptDetail(r.id);
+      const rows: any[] = res.items ?? [];
+      setRepriceId(r.id);
+      setRepriceNo(r.receipt_no ?? r.receiptNo ?? '');
+      setRepriceItems(rows);
+      const init: Record<number, number | string> = {};
+      for (const it of rows) init[it.material_id ?? it.materialId] = Number(it.price ?? 0);
+      setRepricePrices(init);
+      setRepriceOpen(true);
+    } catch (e: any) {
+      message.error(e.message);
+    }
+  }
+
+  async function submitReprice() {
+    if (!repriceId) return;
+    const prices = repriceItems.map((it) => ({
+      materialId: it.material_id ?? it.materialId,
+      price: Number(repricePrices[it.material_id ?? it.materialId] ?? 0) || 0,
+    }));
+    setRepriceSaving(true);
+    try {
+      const res = await purchaseApi.repriceReceipt(repriceId, prices);
+      message.success(`单价已补录，单据金额更新为 ${Number(res.totalAmount).toFixed(2)}`);
+      setRepriceOpen(false);
+      // 刷新展开明细缓存
+      if (repriceId && detail.cache[repriceId]) void detail.load(repriceId);
+      reload();
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setRepriceSaving(false);
+    }
+  }
+
   return (
     <Card
       title="采购入库"
@@ -290,27 +336,37 @@ export default function PurchaseReceiptPage() {
         // 需求 6：点击行展开入库明细
         expandable={{
           expandedRowRender: (r) => (
-            <DetailTable
-              loading={detail.loading[r.id]}
-              items={detail.cache[r.id]?.items ?? []}
-              columns={[
-                { title: '物料编码', dataIndex: 'code', width: 130 },
-                { title: '物料名称', dataIndex: 'name', width: 180 },
-                { title: '规格', dataIndex: 'spec', width: 150 },
-                { title: '单位', dataIndex: 'unit', width: 70 },
-                { title: '入库数量', dataIndex: 'qty', width: 100, className: 'mono' },
-                { title: '单价', dataIndex: 'price', width: 100, render: (v) => <PriceText value={v} /> },
-                {
-                  title: '金额',
-                  width: 110,
-                  className: 'mono',
-                  render: (_v, it) => (
-                    <PriceText value={Number(it.qty ?? 0) * Number(it.price ?? 0)} />
-                  ),
-                },
-                { title: '备注', dataIndex: 'remark' },
-              ]}
-            />
+            <div>
+              <DetailTable
+                loading={detail.loading[r.id]}
+                items={detail.cache[r.id]?.items ?? []}
+                columns={[
+                  { title: '物料编码', dataIndex: 'code', width: 130 },
+                  { title: '物料名称', dataIndex: 'name', width: 180 },
+                  { title: '规格', dataIndex: 'spec', width: 150 },
+                  { title: '单位', dataIndex: 'unit', width: 70 },
+                  { title: '入库数量', dataIndex: 'qty', width: 100, className: 'mono' },
+                  { title: '单价', dataIndex: 'price', width: 100, render: (v) => <PriceText value={v} /> },
+                  {
+                    title: '金额',
+                    width: 110,
+                    className: 'mono',
+                    render: (_v, it) => (
+                      <PriceText value={Number(it.qty ?? 0) * Number(it.price ?? 0)} />
+                    ),
+                  },
+                  { title: '备注', dataIndex: 'remark' },
+                ]}
+              />
+              {/* 需求：单价允许 0、价格后补——展开明细后补录/修改单价 */}
+              {r.canUndo && (
+                <div style={{ marginTop: 8, textAlign: 'right' }}>
+                  <Button size="small" type="link" onClick={() => openReprice(r)}>
+                    补录 / 修改单价
+                  </Button>
+                </div>
+              )}
+            </div>
           ),
           onExpand: (expanded, r) => {
             if (expanded) void detail.load(r.id);
@@ -568,6 +624,60 @@ export default function PurchaseReceiptPage() {
       </Modal>
 
       <OcrImportModal open={ocrOpen} onCancel={() => setOcrOpen(false)} onApply={applyOcr} />
+
+      {/* 需求：物料单价允许 0、价格后补 —— 补录/修改已入库单据单价 */}
+      <Modal
+        open={repriceOpen}
+        title={`补录 / 修改单价${repriceNo ? ` · ${repriceNo}` : ''}`}
+        onCancel={() => setRepriceOpen(false)}
+        onOk={submitReprice}
+        okText="确认改价"
+        okButtonProps={{ loading: repriceSaving }}
+        width={720}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 8, color: '#8c8c8c', fontSize: 12 }}>
+          可把 0 价改为真实单价，也可整体改价。改价会重算单据金额与对应物料的移动加权成本。
+        </div>
+        <ResponsiveTable
+          size="small"
+          rowKey={(r) => String(r.material_id ?? r.materialId)}
+          dataSource={repriceItems}
+          pagination={false}
+          scroll={{ y: 320 }}
+          columns={[
+            { title: '物料', width: 220, render: (_v, r) => `${r.code ?? ''} ${r.name ?? ''}` },
+            { title: '数量', dataIndex: 'qty', width: 90, className: 'mono' },
+            {
+              title: '新单价',
+              width: 150,
+              render: (_v, r) => {
+                const mid = r.material_id ?? r.materialId;
+                return (
+                  <InputNumber
+                    min={0}
+                    step={0.01}
+                    style={{ width: '100%' }}
+                    value={repricePrices[mid] ?? 0}
+                    onChange={(nv) =>
+                      setRepricePrices((prev) => ({ ...prev, [mid]: nv ?? 0 }))
+                    }
+                  />
+                );
+              },
+            },
+            {
+              title: '新金额',
+              width: 110,
+              className: 'mono',
+              render: (_v, r) => {
+                const mid = r.material_id ?? r.materialId;
+                return Number(((repricePrices[mid] ?? 0) as number) * Number(r.qty ?? 0)).toFixed(2);
+              },
+            },
+          ]}
+        />
+      </Modal>
     </Card>
   );
 }

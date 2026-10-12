@@ -14,6 +14,11 @@ import { ok, okList } from '../../shared/http.js';
 import { refreshOrderStatus, syncParentStatus } from './helpers.js';
 import { linkOcrReceipt } from './ocr.js';
 
+/** 4 位小数（与 ledger 内 round 口径一致） */
+function round4(n: number): number {
+  return Math.round(Number(n) * 10000) / 10000;
+}
+
 export const purchaseReceiptRouter = Router();
 
 const itemSchema = z.object({
@@ -272,6 +277,114 @@ purchaseReceiptRouter.get('/:id', requirePerm('purchase.receipt.view'), (req, re
     items: maskList(items, ctx),
   });
 });
+
+/**
+ * 需求：物料单价允许填 0，价格「后补」——入库时先按 0 走流程，结算前补录真实单价。
+ *
+ * 改价的本质（库存数量不变，只动成本与金额，不违反「库存变更只走 applyStock」约束）：
+ *  1. 明细 price/amount、单据 total_amount 按新单价重算；
+ *  2. 每个物料按其入库数量对新单价做移动加权，更新 materials.avg_cost
+ *     （公式与 applyStock 入库一致：(旧成本×旧存 + 新单价×本单量) / (旧存+本单量)）；
+ *  3. 同步把该单在 stock_ledger 的对应流水 unit_price/amount 改掉，台账与单据金额保持一致。
+ * 0 价改 0 价是幂等的，改回 0 时按 0 金额重新加权（会把成本稀释为 0，属预期）。
+ */
+const repriceSchema = z.object({
+  prices: z
+    .array(
+      z.object({
+        materialId: z.number().int().positive(),
+        price: z.number().min(0),
+      }),
+    )
+    .min(1, '请至少指定一个物料的单价'),
+});
+
+purchaseReceiptRouter.post(
+  '/:id/reprice',
+  requirePerm('purchase.receipt.create'),
+  (req, res) => {
+    const id = Number(req.params.id);
+    const parsed = repriceSchema.safeParse(req.body);
+    if (!parsed.success) throw Err.badRequest(parsed.error.issues[0].message);
+    const ctx = req.ctx!;
+
+    const result = tx(() => {
+      const receipt = db
+        .prepare(`SELECT * FROM purchase_receipts WHERE id = ?`)
+        .get(id) as any;
+      if (!receipt) throw Err.notFound('入库单不存在');
+      if (receipt.status !== DOC_STATUS.VALID) throw Err.conflict('该入库单已撤销，无法改价');
+
+      const items = db
+        .prepare(`SELECT * FROM purchase_receipt_items WHERE receipt_id = ?`)
+        .all(id) as any[];
+      const itemById = new Map(items.map((i) => [i.material_id, i]));
+
+      const updItem = db.prepare(
+        `UPDATE purchase_receipt_items SET price = ?, amount = ? WHERE receipt_id = ? AND material_id = ?`,
+      );
+      const updLedger = db.prepare(
+        `UPDATE stock_ledger
+          SET unit_price = ?, amount = ?
+          WHERE biz_type = '采购入库' AND biz_id = ? AND item_type = 'material'
+            AND item_id = ? AND status = '有效' AND is_reversal = 0`,
+      );
+
+      for (const p of parsed.data.prices) {
+        const it = itemById.get(p.materialId);
+        if (!it) throw Err.conflict(`该入库单里没有物料 ${p.materialId}，无法改价`);
+        const qty = Number(it.qty);
+        const amount = round4(qty * p.price);
+
+        // 物料加权成本：旧成本基线 + 本单量新单价，移动加权
+        const mat = db
+          .prepare(`SELECT current_stock, avg_cost FROM materials WHERE id = ?`)
+          .get(p.materialId) as { current_stock: number; avg_cost: number };
+        const newAvg =
+          Number(mat.current_stock) > 0
+            ? (Number(mat.current_stock) * Number(mat.avg_cost) + qty * p.price) /
+              (Number(mat.current_stock) + qty)
+            : p.price;
+
+        db.prepare(`UPDATE materials SET avg_cost = ?, updated_at = ? WHERE id = ?`).run(
+          round4(newAvg),
+          nowIso(),
+          p.materialId,
+        );
+        updItem.run(p.price, amount, id, p.materialId);
+        updLedger.run(p.price, amount, id, p.materialId);
+      }
+
+      // 单据总额 = 未改价的明细 + 改价后的明细
+      const repicedIds = new Set(parsed.data.prices.map((p) => p.materialId));
+      const repicedAmount = parsed.data.prices.reduce((s, p) => {
+        const it = itemById.get(p.materialId)!;
+        return s + round4(Number(it.qty) * p.price);
+      }, 0);
+      const untouchedAmount = items
+        .filter((i) => !repicedIds.has(i.material_id))
+        .reduce((s, i) => s + Number(i.amount), 0);
+      const totalAmount = round4(untouchedAmount + repicedAmount);
+
+      db.prepare(`UPDATE purchase_receipts SET total_amount = ? WHERE id = ?`).run(
+        totalAmount,
+        id,
+      );
+
+      writeLog({
+        operatorId: ctx.userId,
+        action: '补录/修改入库单价',
+        targetType: 'purchase_receipt',
+        targetId: id,
+        detail: { count: parsed.data.prices.length, totalAmount },
+      });
+
+      return { totalAmount };
+    });
+
+    ok(res, { id, totalAmount: result.totalAmount });
+  },
+);
 
 /** 撤销入库：反向流水回滚库存，回退订单已入库量（需求 3.4.4） */
 purchaseReceiptRouter.post('/:id/undo', requirePerm('purchase.receipt.undo'), (req, res) => {

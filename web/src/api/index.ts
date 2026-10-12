@@ -69,6 +69,9 @@ export const purchaseApi = {
   receiptDetail: (id: number) => api.get<any>(`/purchase/receipts/${id}`),
   createReceipt: (b: any) => api.post<{ id: number }>('/purchase/receipts', b),
   undoReceipt: (id: number) => api.post<{ id: number }>(`/purchase/receipts/${id}/undo`),
+  // 物料单价允许填 0 + 价格后补：补录/修改已入库单据单价
+  repriceReceipt: (id: number, prices: { materialId: number; price: number }[]) =>
+    api.post<{ id: number; totalAmount: number }>(`/purchase/receipts/${id}/reprice`, { prices }),
 
   returns: (p?: any) => api.get<ListResult<any>>('/purchase/returns', p),
   createReturn: (b: any) => api.post<{ id: number }>('/purchase/returns', b),
