@@ -81,6 +81,7 @@ export const IMPORT_KINDS: ImportKindDef[] = [
       { key: 'code', label: '产品编码', required: true },
       { key: 'name', label: '产品名称', required: true },
       { key: 'spec', label: '规格型号' },
+      { key: 'category', label: '分类' },
       { key: 'unit', label: '单位' },
       { key: 'packingSpec', label: '装箱规格' },
       { key: 'safetyStock', label: '安全库存' },
@@ -302,14 +303,15 @@ function importProduct(r: Record<string, any>): void {
   // 只建档案，不写库存：current_stock 固定 0，期初数量走 initial_stock 导入，
   // 避免两条路径都能改库存导致口径不一致（库存变更只认 ledger）。
   db.prepare(
-    `INSERT INTO products (code, name, pinyin, spec, unit, packing_spec,
+    `INSERT INTO products (code, name, pinyin, spec, category, unit, packing_spec,
                            safety_stock, current_stock, bom_version, remark, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,0,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)`,
   ).run(
     code,
     name,
     pinyinInitials(name),
     str(r.spec),
+    str(r.category) || null,
     str(r.unit) || '台',
     str(r.packingSpec),
     safety ?? 0,

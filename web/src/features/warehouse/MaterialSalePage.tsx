@@ -13,6 +13,7 @@ import {
   DockAction,
   CopyableCode,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -159,7 +160,7 @@ export default function MaterialSalePage() {
 
       <Modal open={open} title="新增物料销售" onCancel={() => setOpen(false)} onOk={submit} width={860} destroyOnClose>
         <Space wrap style={{ marginBottom: 12 }}>
-          <Select style={{ width: 260 }} placeholder="客户（可选）" allowClear value={customerId} onChange={setCustomerId}
+          <SearchableSelect style={{ width: 260 }} placeholder="客户（可选）" allowClear value={customerId} onChange={setCustomerId}
             options={customers.map((c) => ({ value: c.id, label: c.name }))} />
           <DatePicker value={dayVal(saleDate)} onChange={(d) => setSaleDate(d ? d.format('YYYY-MM-DD') : today())} />
           <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, price: 0 }])}>添加明细</Button>

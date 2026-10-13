@@ -7,7 +7,6 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Switch,
   Table,
@@ -24,6 +23,7 @@ import {
   ResponsiveTable,
   DockAction,
   ImportExcelModal,
+  SearchableSelect,
 } from '../../components';
 import { exportCsv } from '../../utils/exportCsv';
 
@@ -184,7 +184,7 @@ export default function MaterialPage() {
               <PermGate permission="archive.material.manage">
                 <Space size={4}>
                   <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
+                    修改
                   </Button>
                   <Popconfirm
                     title="确认删除该物料？"
@@ -212,7 +212,7 @@ export default function MaterialPage() {
 
       <Modal
         open={open}
-        title={editing ? '编辑物料' : '新增物料'}
+        title={editing ? '修改物料' : '新增物料'}
         onCancel={() => setOpen(false)}
         onOk={submit}
         width={560}
@@ -234,7 +234,7 @@ export default function MaterialPage() {
             </Form.Item>
           </Space>
           <Form.Item name="defaultSupplierId" label="默认供应商">
-            <Select
+            <SearchableSelect
               allowClear
               placeholder="未配置供应商时采购需手工指定"
               options={suppliers.map((s) => ({ value: s.id, label: s.name }))}
@@ -248,8 +248,8 @@ export default function MaterialPage() {
               <Switch />
             </Form.Item>
           </Space>
-          <Form.Item name="category" label="分类">
-            <Input />
+          <Form.Item name="category" label="分类（选填）">
+            <Input placeholder="如：电子件 / 结构件 / 包材 / 耗材" />
           </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={2} />

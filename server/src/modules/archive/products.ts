@@ -20,6 +20,8 @@ const productSchema = z.object({
   code: z.string().trim().optional(),
   name: z.string().trim().min(1, '成品名称不能为空'),
   spec: z.string().trim().optional().default(''),
+  /** 分类（选填），与物料档案 materials.category 口径一致 */
+  category: z.string().trim().optional().default(''),
   unit: z.string().trim().default('台'),
   packingSpec: z.string().trim().optional().default(''),
   cartonMaterialId: z.number().int().nullable().optional(),
@@ -120,15 +122,16 @@ productRouter.post('/', requirePerm('archive.product.manage'), (req, res) => {
     const code = d.code?.trim() || nextProductCode();
     const info = db
       .prepare(
-        `INSERT INTO products (code, name, pinyin, spec, unit, packing_spec, carton_material_id,
+        `INSERT INTO products (code, name, pinyin, spec, category, unit, packing_spec, carton_material_id,
            safety_stock, bom_version, remark, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         code,
         d.name,
         pinyinInitials(d.name),
         d.spec,
+        d.category || null,
         d.unit,
         d.packingSpec,
         d.cartonMaterialId ?? null,
@@ -174,13 +177,14 @@ productRouter.put('/:id', requirePerm('archive.product.manage'), (req, res) => {
     validateBom(d.bom, d.confirmNoBom);
 
     db.prepare(
-      `UPDATE products SET name=?, pinyin=?, spec=?, unit=?, packing_spec=?, carton_material_id=?,
+      `UPDATE products SET name=?, pinyin=?, spec=?, category=?, unit=?, packing_spec=?, carton_material_id=?,
          safety_stock=?, bom_version=?, remark=?, updated_at=?
        WHERE id=?`,
     ).run(
       d.name,
       pinyinInitials(d.name),
       d.spec,
+      d.category || null,
       d.unit,
       d.packingSpec,
       d.cartonMaterialId ?? null,

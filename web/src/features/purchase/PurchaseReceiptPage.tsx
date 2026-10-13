@@ -32,6 +32,7 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -467,7 +468,7 @@ export default function PurchaseReceiptPage() {
               label: `${o.order_no} · ${o.summary ?? ''} · ${o.supplier_name ?? '待分配'}`,
             }))}
           />
-          <Select
+          <SearchableSelect
             style={{ width: 240 }}
             placeholder="供应商"
             allowClear

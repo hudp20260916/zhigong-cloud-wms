@@ -7,7 +7,6 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Table,
   Tag,
@@ -16,7 +15,15 @@ import {
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, ResponsiveTable, DockAction, ImportExcelModal } from '../../components';
+import { useRowDetail } from '../../hooks/useRowDetail';
+import {
+  PermGate,
+  ResponsiveTable,
+  DockAction,
+  ImportExcelModal,
+  DetailTable,
+  SearchableSelect,
+} from '../../components';
 import { exportCsv } from '../../utils/exportCsv';
 
 interface BomRow {
@@ -30,6 +37,7 @@ interface Product {
   code: string;
   name: string;
   spec?: string;
+  category?: string;
   unit: string;
   packing_spec?: string;
   carton_material_id?: number | null;
@@ -44,6 +52,8 @@ export default function ProductPage() {
   const { list, total, loading, params, patchParams, reload } = useList<Product>((p) =>
     archiveApi.products(p),
   );
+  // 需求二.4：点击行展开该成品的 BOM 配置表（明细只读）
+  const detail = useRowDetail((id: number) => archiveApi.productDetail(id));
   const [materials, setMaterials] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -79,6 +89,7 @@ export default function ProductPage() {
         code: '',
         name: `${detail.name}-副本`,
         spec: detail.spec,
+        category: detail.category,
         unit: detail.unit,
         packingSpec: detail.packing_spec,
         cartonMaterialId: detail.carton_material_id ?? undefined,
@@ -107,6 +118,7 @@ export default function ProductPage() {
         code: detail.code,
         name: detail.name,
         spec: detail.spec,
+        category: detail.category,
         unit: detail.unit,
         packingSpec: detail.packing_spec,
         cartonMaterialId: detail.carton_material_id ?? undefined,
@@ -186,6 +198,7 @@ export default function ProductPage() {
                 { title: '产品编码', key: 'code' },
                 { title: '产品名称', key: 'name' },
                 { title: '规格型号', key: 'spec' },
+                { title: '分类', key: 'category' },
                 { title: '单位', key: 'unit' },
                 { title: '装箱规格', key: 'packing_spec' },
                 { title: '安全库存', key: 'safety_stock' },
@@ -209,7 +222,33 @@ export default function ProductPage() {
         size="small"
         loading={loading}
         dataSource={list}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1300 }}
+        // 需求二.4：点击行展开该成品的 BOM 配置表（明细只读，含明细字段）
+        expandable={{
+          expandedRowRender: (r) => (
+            <DetailTable
+              loading={detail.loading[r.id]}
+              items={detail.cache[r.id]?.bom ?? []}
+              columns={[
+                { title: '物料编码', dataIndex: 'materialCode', width: 130 },
+                { title: '物料名称', dataIndex: 'materialName', width: 180 },
+                { title: '规格', dataIndex: 'spec', width: 150 },
+                { title: '单位', dataIndex: 'unit', width: 70 },
+                { title: '单件耗用量', dataIndex: 'qtyPerUnit', width: 110, className: 'mono' },
+                {
+                  title: '类型',
+                  dataIndex: 'isVirtual',
+                  width: 90,
+                  render: (v) => (v ? <Tag color="purple">虚拟件</Tag> : <Tag>实阶物料</Tag>),
+                },
+                { title: '备注', dataIndex: 'remark' },
+              ]}
+            />
+          ),
+          onExpand: (expanded, r) => {
+            if (expanded) void detail.load(r.id);
+          },
+        }}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,
@@ -221,6 +260,7 @@ export default function ProductPage() {
           { title: '成品编码', dataIndex: 'code', width: 110 },
           { title: '成品名称', dataIndex: 'name', width: 180 },
           { title: '规格型号', dataIndex: 'spec', width: 120 },
+          { title: '分类', dataIndex: 'category', width: 100 },
           { title: '单位', dataIndex: 'unit', width: 70 },
           { title: '装箱规格', dataIndex: 'packing_spec', width: 100 },
           { title: '安全库存', dataIndex: 'safety_stock', width: 100, className: 'mono' },
@@ -238,9 +278,10 @@ export default function ProductPage() {
             fixed: 'right',
             render: (_, r) => (
               <PermGate permission="archive.product.manage">
-                <Space size={0}>
+                {/* stopPropagation：点操作按钮不要连带触发行展开 */}
+                <Space size={0} onClick={(e) => e.stopPropagation()}>
                   <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
+                    修改
                   </Button>
                   <Button
                     type="link"
@@ -275,7 +316,7 @@ export default function ProductPage() {
 
       <Modal
         open={open}
-        title={editing ? '编辑成品' : '新增成品'}
+        title={editing ? '修改成品' : '新增成品'}
         onCancel={() => setOpen(false)}
         onOk={submit}
         width={900}
@@ -294,6 +335,11 @@ export default function ProductPage() {
             <Form.Item name="spec" label="规格型号" style={{ flex: 1 }}>
               <Input />
             </Form.Item>
+            <Form.Item name="category" label="分类（选填）" style={{ flex: 1 }}>
+              <Input placeholder="如：整机 / 配件 / 半成品" />
+            </Form.Item>
+          </Space>
+          <Space size={12} style={{ display: 'flex' }}>
             <Form.Item name="unit" label="单位" style={{ width: 110 }}>
               <Input />
             </Form.Item>
@@ -303,7 +349,7 @@ export default function ProductPage() {
           </Space>
           <Space size={12} style={{ display: 'flex' }}>
             <Form.Item name="cartonMaterialId" label="外箱物料" style={{ flex: 1 }}>
-              <Select allowClear options={materialOptions} />
+              <SearchableSelect allowClear options={materialOptions} placeholder="请选择外箱物料" />
             </Form.Item>
             <Form.Item name="safetyStock" label="安全库存" style={{ width: 140 }}>
               <InputNumber min={0} style={{ width: '100%' }} />
@@ -340,7 +386,7 @@ export default function ProductPage() {
               title: '物料',
               dataIndex: 'materialId',
               render: (v, r) => (
-                <Select
+                <SearchableSelect
                   style={{ width: '100%' }}
                   value={v}
                   placeholder="请选择物料"

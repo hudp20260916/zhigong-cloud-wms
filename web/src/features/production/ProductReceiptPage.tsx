@@ -30,6 +30,7 @@ import {
   DockAction,
   CopyableCode,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -321,7 +322,7 @@ export default function ProductReceiptPage() {
               }))}
             />
           )}
-          <Select
+          <SearchableSelect
             style={{ width: 260 }}
             placeholder="关联生产工单（可选）"
             allowClear

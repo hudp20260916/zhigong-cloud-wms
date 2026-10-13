@@ -14,6 +14,7 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -187,7 +188,7 @@ export default function SaleOrderPage() {
 
       <Modal open={open} title="新增销售单" onCancel={() => setOpen(false)} onOk={submit} width={900} destroyOnClose>
         <Space wrap style={{ marginBottom: 12 }}>
-          <Select style={{ width: 260 }} placeholder="客户" allowClear value={customerId} onChange={setCustomerId}
+          <SearchableSelect style={{ width: 260 }} placeholder="客户" allowClear value={customerId} onChange={setCustomerId}
             options={customers.map((c) => ({ value: c.id, label: c.name }))} />
           <DatePicker value={dayVal(orderDate)} onChange={(d) => setOrderDate(d ? d.format('YYYY-MM-DD') : today())} />
           <Button

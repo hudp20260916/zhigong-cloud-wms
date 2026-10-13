@@ -13,6 +13,7 @@ import {
   DockAction,
   CopyableCode,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -161,8 +162,8 @@ export default function SaleReturnPage() {
 
       <Modal open={open} title="新增销售退货" onCancel={() => setOpen(false)} onOk={submit} width={860} destroyOnClose>
         <Space wrap style={{ marginBottom: 12 }}>
-          <Select style={{ width: 300 }} placeholder="关联销售开单（可选）" allowClear value={orderId}
-            onChange={(v) => { setOrderId(v); if (v) saleApi.orderDetail(v).then((d) => setItems(d.items.map((i: any, idx: number) => ({ key: `r-${idx}`, productId: i.product_id, qty: i.qty, price: i.price })))); }}
+          <SearchableSelect style={{ width: 300 }} placeholder="关联销售开单（可选）" allowClear value={orderId}
+            onChange={(v: any) => { setOrderId(v); if (v) saleApi.orderDetail(v).then((d) => setItems(d.items.map((i: any, idx: number) => ({ key: `r-${idx}`, productId: i.product_id, qty: i.qty, price: i.price })))); }}
             options={orders.map((o) => ({ value: o.id, label: `${o.order_no} · ${o.customer_name ?? '无客户'}` }))} />
           <DatePicker value={dayVal(returnDate)} onChange={(d) => setReturnDate(d ? d.format('YYYY-MM-DD') : today())} />
           <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, price: 0 }])}>添加明细</Button>

@@ -14,6 +14,7 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  SearchableSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -190,7 +191,7 @@ export default function SaleDeliveryPage() {
 
       <Modal open={open} title="一键生成销售出库单" onCancel={() => setOpen(false)} onOk={submit} destroyOnClose>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <Select style={{ width: '100%' }} placeholder="选择待出库的销售单" value={orderId} onChange={setOrderId}
+          <SearchableSelect style={{ width: '100%' }} placeholder="选择待出库的销售单" value={orderId} onChange={setOrderId}
             options={orders.map((o) => ({ value: o.id, label: `${o.order_no} · ${o.customer_name ?? '无客户'} · ${o.total_amount}` }))} />
           <DatePicker style={{ width: '100%' }} value={dayVal(deliveryDate)} onChange={(d) => setDeliveryDate(d ? d.format('YYYY-MM-DD') : today())} />
           <Input.TextArea rows={2} placeholder="备注" value={remark} onChange={(e) => setRemark(e.target.value)} />

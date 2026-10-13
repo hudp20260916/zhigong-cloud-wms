@@ -8,6 +8,7 @@ import ImportExcelModal from './ImportExcelModal';
 import { CopyableCode } from './CopyableCode';
 import { DetailTable } from './DetailTable';
 import { FilterBar } from './FilterBar';
+import { SearchableSelect } from './SearchableSelect';
 
 export {
   PrintButton,
@@ -17,6 +18,7 @@ export {
   CopyableCode,
   DetailTable,
   FilterBar,
+  SearchableSelect,
 };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
