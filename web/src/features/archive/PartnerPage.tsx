@@ -66,6 +66,14 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
     setOpen(true);
   }
 
+  /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
+  function closeModal() {
+    setOpen(false);
+    setEditing(null);
+    setCopying(false);
+    form.resetFields();
+  }
+
   async function submit() {
     const v = await form.validateFields();
     // 复制模式不提交编码，交服务端按规则生成；修改模式编码只读、原样回传
@@ -80,7 +88,7 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
         else await archiveApi.createCustomer(payload);
         message.success(copying ? `${label}副本已创建` : `${label}已创建`);
       }
-      setOpen(false);
+      closeModal();
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -180,7 +188,7 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
       <Modal
         open={open}
         title={editing ? `修改${label}` : copying ? `复制${label}` : `新增${label}`}
-        onCancel={() => setOpen(false)}
+        onCancel={closeModal}
         onOk={submit}
         destroyOnClose
       >

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Form,
@@ -57,7 +58,18 @@ export default function ProductPage() {
   const [materials, setMaterials] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  /** 复制模式：带出源记录全部字段，编码置空由服务端按规则重新生成 */
+  const [copying, setCopying] = useState(false);
   const [bom, setBom] = useState<BomRow[]>([]);
+  /** 详情加载中：加载期间禁用表单与确定按钮，避免用户对空表单操作导致覆盖已有数据 */
+  const [detailLoading, setDetailLoading] = useState(false);
+  /**
+   * 待回填的详情数据。
+   * 不直接写表单，先存这里，等 Modal 挂载完成后由 useEffect 统一回填（见 loadInto 注释）。
+   */
+  const [pendingDetail, setPendingDetail] = useState<Record<string, any> | null>(null);
+  /** 保存中：确定按钮 loading，防重复提交 */
+  const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -74,31 +86,43 @@ export default function ProductPage() {
 
   function openCreate() {
     setEditing(null);
+    setCopying(false);
+    setBom([]);
     form.resetFields();
     form.setFieldsValue({ unit: '台', safetyStock: 0, bomVersion: 'V1.0' });
-    setBom([]);
+    setDetailLoading(false);
     setOpen(true);
   }
 
-  /** 成品复制：带出源成品全部档案属性与 BOM，编码留空由服务端重新分配（需求 4.2） */
-  async function openCopy(row: Product) {
+  /**
+   * 拉取详情并回填。
+   *
+   * ⚠️ 时序要点（修复「编辑页不回填」的根因）：
+   * Modal 用了 destroyOnClose + Form preserve={false}，字段在弹窗**首次挂载时**才注册，
+   * 而挂载前的 setFieldsValue 会被初始化覆盖为空。因此必须先 await 取数、
+   * 把数据存进 pendingDetail，等弹窗挂载完成后由 useEffect 统一回填，
+   * 不能在 setOpen(true) 之前直接写表单。
+   */
+  async function loadInto(row: Product, mode: 'edit' | 'copy') {
+    setDetailLoading(true);
+    setEditing(mode === 'edit' ? row : null);
+    setCopying(mode === 'copy');
     try {
-      const detail = await archiveApi.productDetail(row.id);
-      setEditing(null);
-      form.setFieldsValue({
-        code: '',
-        name: `${detail.name}-副本`,
-        spec: detail.spec,
-        category: detail.category,
-        unit: detail.unit,
-        packingSpec: detail.packing_spec,
-        cartonMaterialId: detail.carton_material_id ?? undefined,
-        safetyStock: detail.safety_stock,
-        bomVersion: detail.bom_version,
-        remark: detail.remark,
+      const d = await archiveApi.productDetail(row.id);
+      setPendingDetail({
+        code: mode === 'copy' ? '' : d.code,
+        name: mode === 'copy' ? `${d.name}-副本` : d.name,
+        spec: d.spec,
+        category: d.category,
+        unit: d.unit,
+        packingSpec: d.packing_spec,
+        cartonMaterialId: d.carton_material_id ?? undefined,
+        safetyStock: d.safety_stock,
+        bomVersion: d.bom_version,
+        remark: d.remark,
       });
       setBom(
-        (detail.bom ?? []).map((b: any, i: number) => ({
+        (d.bom ?? []).map((b: any, i: number) => ({
           key: String(i),
           materialId: b.materialId,
           qty: b.qtyPerUnit,
@@ -107,39 +131,38 @@ export default function ProductPage() {
       setOpen(true);
     } catch (e: any) {
       message.error(e.message);
+    } finally {
+      setDetailLoading(false);
     }
   }
 
-  async function openEdit(row: Product) {
-    try {
-      const detail = await archiveApi.productDetail(row.id);
-      setEditing(row);
-      form.setFieldsValue({
-        code: detail.code,
-        name: detail.name,
-        spec: detail.spec,
-        category: detail.category,
-        unit: detail.unit,
-        packingSpec: detail.packing_spec,
-        cartonMaterialId: detail.carton_material_id ?? undefined,
-        safetyStock: detail.safety_stock,
-        bomVersion: detail.bom_version,
-        remark: detail.remark,
-      });
-      setBom(
-        (detail.bom ?? []).map((b: any, i: number) => ({
-          key: String(i),
-          materialId: b.materialId,
-          qty: b.qtyPerUnit,
-        })),
-      );
-      setOpen(true);
-    } catch (e: any) {
-      message.error(e.message);
-    }
+  function openEdit(row: Product) {
+    void loadInto(row, 'edit');
   }
+
+  /** 成品复制：带出源成品全部档案属性与 BOM，编码留空由服务端重新分配（需求 4.2） */
+  function openCopy(row: Product) {
+    void loadInto(row, 'copy');
+  }
+
+  /**
+   * 弹窗挂载完成后再回填表单。
+   * 依赖 open 变化：新建走默认值，修改/复制走 pendingDetail。
+   */
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) {
+      form.setFieldsValue(pendingDetail);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   async function submit() {
+    // 详情未加载完时禁止提交，避免把空表单当有效数据保存、覆盖已有档案
+    if (detailLoading) {
+      message.warning('数据加载中，请稍候');
+      return;
+    }
     const v = await form.validateFields().catch(() => null);
     if (!v) return;
 
@@ -165,19 +188,32 @@ export default function ProductPage() {
   }
 
   async function doSave(payload: any) {
+    setSaving(true);
     try {
       if (editing) {
         await archiveApi.updateProduct(editing.id, payload);
         message.success('成品已更新');
       } else {
         await archiveApi.createProduct(payload);
-        message.success('新成品档案已创建');
+        message.success(copying ? '成品副本已创建' : '新成品档案已创建');
       }
-      setOpen(false);
+      closeModal();
       reload();
     } catch (e: any) {
       message.error(e.message);
+    } finally {
+      setSaving(false);
     }
+  }
+
+  /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
+  function closeModal() {
+    setOpen(false);
+    setPendingDetail(null);
+    setEditing(null);
+    setCopying(false);
+    setBom([]);
+    form.resetFields();
   }
 
   return (
@@ -316,13 +352,27 @@ export default function ProductPage() {
 
       <Modal
         open={open}
-        title={editing ? '修改成品' : '新增成品'}
-        onCancel={() => setOpen(false)}
+        title={editing ? '修改成品' : copying ? '复制成品' : '新增成品'}
+        onCancel={closeModal}
         onOk={submit}
         width={900}
-        destroyOnClose
+        confirmLoading={saving}
+        // 不再使用 destroyOnClose：它会在弹窗关闭时销毁 Form，
+        // 与 preserve={false} 叠加会导致「挂载前写入的表单值被初始化覆盖为空」，
+        // 改为在 openCreate / 关闭时手动 resetFields，时序更可控。
+        destroyOnClose={false}
+        forceRender
       >
-        <Form form={form} layout="vertical" preserve={false}>
+        <Form form={form} layout="vertical" preserve={false} disabled={detailLoading}>
+          {/* 加载中提示：明确告知正在读取已有数据，避免误以为表单为空 */}
+          {detailLoading && (
+            <Alert
+              type="info"
+              showIcon
+              message="正在加载该成品的完整档案与 BOM 明细，请稍候…"
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <Space size={12} style={{ display: 'flex' }}>
             <Form.Item
               name="code"
