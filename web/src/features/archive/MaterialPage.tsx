@@ -52,6 +52,8 @@ export default function MaterialPage() {
   const [editing, setEditing] = useState<Material | null>(null);
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
+  /** 待回填数据：先暂存，等弹窗挂载完成后由 useEffect 统一回填 */
+  const [pendingDetail, setPendingDetail] = useState<Record<string, any> | null>(null);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -64,17 +66,21 @@ export default function MaterialPage() {
   function openCreate() {
     setEditing(null);
     setCopying(false);
+    setPendingDetail(null);
     form.resetFields();
     form.setFieldsValue({ unit: '个', safetyStock: 0, isVirtual: false });
     setOpen(true);
   }
 
-  /** 修改：带出全部字段；编码锁定只读（防重复编码与关联数据错位） */
+  /**
+   * 修改/复制共用同一条路径：先把回填数据暂存到 pendingDetail，
+   * 等弹窗挂载完成后由下方 useEffect 统一回填（避免 destroyOnClose +
+   * preserve={false} 导致「挂载前写值被初始化覆盖清空」，同成品档案修复）。
+   */
   function openEdit(row: Material) {
     setEditing(row);
     setCopying(false);
-    form.resetFields();
-    form.setFieldsValue({
+    setPendingDetail({
       code: row.code,
       name: row.name,
       spec: row.spec,
@@ -88,12 +94,10 @@ export default function MaterialPage() {
     setOpen(true);
   }
 
-  /** 复制：带出全部字段，编码置空由服务端按规则生成，名称加「-副本」区分 */
   function openCopy(row: Material) {
     setEditing(null);
     setCopying(true);
-    form.resetFields();
-    form.setFieldsValue({
+    setPendingDetail({
       code: '',
       name: `${row.name}-副本`,
       spec: row.spec,
@@ -107,11 +111,19 @@ export default function MaterialPage() {
     setOpen(true);
   }
 
+  /** 弹窗挂载完成后回填表单（同成品档案，杜绝回填被覆盖） */
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) form.setFieldsValue(pendingDetail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
   function closeModal() {
     setOpen(false);
     setEditing(null);
     setCopying(false);
+    setPendingDetail(null);
     form.resetFields();
   }
 
@@ -259,7 +271,10 @@ export default function MaterialPage() {
         onCancel={closeModal}
         onOk={submit}
         width={560}
-        destroyOnClose
+        // 与成品档案一致：不使用 destroyOnClose，改由 closeModal 统一清理，
+        // 避免 destroyOnClose + preserve={false} 叠加导致挂载前回填被覆盖
+        destroyOnClose={false}
+        forceRender
       >
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item

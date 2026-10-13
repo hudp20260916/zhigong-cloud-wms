@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, message } from 'antd';
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
@@ -27,21 +27,27 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
   const [editing, setEditing] = useState<Partner | null>(null);
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
+  /** 待回填数据：先暂存，等弹窗挂载完成后由 useEffect 统一回填 */
+  const [pendingDetail, setPendingDetail] = useState<Record<string, any> | null>(null);
   const [form] = Form.useForm();
 
   function openCreate() {
     setEditing(null);
     setCopying(false);
+    setPendingDetail(null);
     form.resetFields();
     setOpen(true);
   }
 
-  /** 修改：带出全部字段；编码锁定只读（防重复编码） */
+  /**
+   * 修改/复制共用同一条路径：先把回填数据暂存到 pendingDetail，
+   * 等弹窗挂载完成后由下方 useEffect 统一回填（同成品档案修复，
+   * 避免 destroyOnClose + preserve={false} 导致挂载前回填被覆盖）。
+   */
   function openEdit(row: Partner) {
     setEditing(row);
     setCopying(false);
-    form.resetFields();
-    form.setFieldsValue({
+    setPendingDetail({
       code: row.code,
       name: row.name,
       contact: row.contact,
@@ -51,12 +57,10 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
     setOpen(true);
   }
 
-  /** 复制：带出全部字段，编码置空由服务端自动生成，名称加「-副本」区分 */
   function openCopy(row: Partner) {
     setEditing(null);
     setCopying(true);
-    form.resetFields();
-    form.setFieldsValue({
+    setPendingDetail({
       code: '',
       name: `${row.name}-副本`,
       contact: row.contact,
@@ -66,11 +70,19 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
     setOpen(true);
   }
 
+  /** 弹窗挂载完成后回填表单（同成品档案，杜绝回填被覆盖） */
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) form.setFieldsValue(pendingDetail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
   function closeModal() {
     setOpen(false);
     setEditing(null);
     setCopying(false);
+    setPendingDetail(null);
     form.resetFields();
   }
 
@@ -190,7 +202,10 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
         title={editing ? `修改${label}` : copying ? `复制${label}` : `新增${label}`}
         onCancel={closeModal}
         onOk={submit}
-        destroyOnClose
+        // 与成品/物料档案一致：不使用 destroyOnClose，改由 closeModal 统一清理，
+        // 避免 destroyOnClose + preserve={false} 叠加导致挂载前回填被覆盖
+        destroyOnClose={false}
+        forceRender
       >
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item
