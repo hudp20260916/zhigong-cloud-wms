@@ -147,15 +147,19 @@ export default function ProductPage() {
 
   /**
    * 弹窗挂载完成后再回填表单。
-   * 依赖 open 变化：新建走默认值，修改/复制走 pendingDetail。
+   *
+   * ⚠️ 依赖用 [open, editing, copying, pendingDetail]，不用 [open] 单依赖——
+   * 单依赖会让 effect 闭包绑到旧渲染帧的 pendingDetail，React 18 某些时序下
+   * 读到 null 直接 return，导致回填被跳过。
    */
   useEffect(() => {
     if (!open) return;
     if (pendingDetail) {
       form.setFieldsValue(pendingDetail);
     }
+    // 依赖带全 editing/copying/pendingDetail，保证闭包读到最新值
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, editing, copying, pendingDetail]);
 
   async function submit() {
     // 详情未加载完时禁止提交，避免把空表单当有效数据保存、覆盖已有档案

@@ -27,62 +27,55 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
   const [editing, setEditing] = useState<Partner | null>(null);
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
-  /** 待回填数据：先暂存，等弹窗挂载完成后由 useEffect 统一回填 */
-  const [pendingDetail, setPendingDetail] = useState<Record<string, any> | null>(null);
   const [form] = Form.useForm();
 
   function openCreate() {
     setEditing(null);
     setCopying(false);
-    setPendingDetail(null);
     form.resetFields();
     setOpen(true);
   }
 
   /**
-   * 修改/复制共用同一条路径：先把回填数据暂存到 pendingDetail，
-   * 等弹窗挂载完成后由下方 useEffect 统一回填（同成品档案修复，
-   * 避免 destroyOnClose + preserve={false} 导致挂载前回填被覆盖）。
+   * 修改/复制：数据源统一存到 editing（row 本身），由下方 useEffect
+   * 在 [open, editing, copying] 任一变化时按 copying 标志回填，
+   * 绕开「useEffect 闭包取旧 state」陷阱。
    */
   function openEdit(row: Partner) {
     setEditing(row);
     setCopying(false);
-    setPendingDetail({
-      code: row.code,
-      name: row.name,
-      contact: row.contact,
-      phone: row.phone,
-      remark: row.remark,
-    });
     setOpen(true);
   }
 
   function openCopy(row: Partner) {
-    setEditing(null);
+    setEditing(row); // 复制时也存 row 作为数据源
     setCopying(true);
-    setPendingDetail({
-      code: '',
-      name: `${row.name}-副本`,
-      contact: row.contact,
-      phone: row.phone,
-      remark: row.remark,
-    });
     setOpen(true);
   }
 
-  /** 弹窗挂载完成后回填表单（同成品档案，杜绝回填被覆盖） */
+  /**
+   * 弹窗挂载完成 + 已知数据源时回填。
+   * ⚠️ 依赖用 [open, editing, copying]，不用 [open] 单依赖（闭包陷阱）。
+   */
   useEffect(() => {
     if (!open) return;
-    if (pendingDetail) form.setFieldsValue(pendingDetail);
+    if (!editing) return; // 新建模式走 openCreate 的默认
+    const isCopy = copying;
+    form.setFieldsValue({
+      code: isCopy ? '' : editing.code,
+      name: isCopy ? `${editing.name}-副本` : editing.name,
+      contact: editing.contact,
+      phone: editing.phone,
+      remark: editing.remark,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, editing, copying]);
 
   /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
   function closeModal() {
     setOpen(false);
     setEditing(null);
     setCopying(false);
-    setPendingDetail(null);
     form.resetFields();
   }
 

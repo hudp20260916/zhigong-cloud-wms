@@ -52,8 +52,6 @@ export default function MaterialPage() {
   const [editing, setEditing] = useState<Material | null>(null);
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
-  /** 待回填数据：先暂存，等弹窗挂载完成后由 useEffect 统一回填 */
-  const [pendingDetail, setPendingDetail] = useState<Record<string, any> | null>(null);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -66,64 +64,55 @@ export default function MaterialPage() {
   function openCreate() {
     setEditing(null);
     setCopying(false);
-    setPendingDetail(null);
     form.resetFields();
     form.setFieldsValue({ unit: '个', safetyStock: 0, isVirtual: false });
     setOpen(true);
   }
 
   /**
-   * 修改/复制共用同一条路径：先把回填数据暂存到 pendingDetail，
-   * 等弹窗挂载完成后由下方 useEffect 统一回填（避免 destroyOnClose +
-   * preserve={false} 导致「挂载前写值被初始化覆盖清空」，同成品档案修复）。
+   * 修改：数据源直接用 editing（当前渲染帧已提交），由下方 useEffect
+   * 在 [open, editing, copying] 任一变化时回填，绕开「闭包取旧 state」陷阱。
+   * 复制：编码置空 + 名称加「-副本」，仍用 editing 的 row 作为数据源。
    */
   function openEdit(row: Material) {
     setEditing(row);
     setCopying(false);
-    setPendingDetail({
-      code: row.code,
-      name: row.name,
-      spec: row.spec,
-      category: row.category,
-      unit: row.unit,
-      defaultSupplierId: row.default_supplier_id ?? undefined,
-      safetyStock: row.safety_stock,
-      isVirtual: row.is_virtual === 1,
-      remark: row.remark,
-    });
     setOpen(true);
   }
 
   function openCopy(row: Material) {
-    setEditing(null);
+    setEditing(row); // 复制时也存 row，让 effect 能拿到全部字段
     setCopying(true);
-    setPendingDetail({
-      code: '',
-      name: `${row.name}-副本`,
-      spec: row.spec,
-      category: row.category,
-      unit: row.unit,
-      defaultSupplierId: row.default_supplier_id ?? undefined,
-      safetyStock: row.safety_stock,
-      isVirtual: row.is_virtual === 1,
-      remark: row.remark,
-    });
     setOpen(true);
   }
 
-  /** 弹窗挂载完成后回填表单（同成品档案，杜绝回填被覆盖） */
+  /**
+   * 弹窗挂载完成 + 已知数据源时回填。
+   * ⚠️ 依赖用 [open, editing, copying]，不用 [open] 单依赖（闭包陷阱）。
+   */
   useEffect(() => {
     if (!open) return;
-    if (pendingDetail) form.setFieldsValue(pendingDetail);
+    if (!editing) return; // 新建模式走 openCreate 的默认值
+    const isCopy = copying;
+    form.setFieldsValue({
+      code: isCopy ? '' : editing.code,
+      name: isCopy ? `${editing.name}-副本` : editing.name,
+      spec: editing.spec,
+      category: editing.category,
+      unit: editing.unit,
+      defaultSupplierId: editing.default_supplier_id ?? undefined,
+      safetyStock: editing.safety_stock,
+      isVirtual: editing.is_virtual === 1,
+      remark: editing.remark,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, editing, copying]);
 
   /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
   function closeModal() {
     setOpen(false);
     setEditing(null);
     setCopying(false);
-    setPendingDetail(null);
     form.resetFields();
   }
 
