@@ -324,8 +324,18 @@ export default function ProductPage() {
       >
         <Form form={form} layout="vertical" preserve={false}>
           <Space size={12} style={{ display: 'flex' }}>
-            <Form.Item name="code" label="成品编码" style={{ flex: 1 }}>
-              <Input placeholder="留空自动生成唯一编码（复制时请勿保留原编码）" />
+            <Form.Item
+              name="code"
+              label="成品编码"
+              style={{ flex: 1 }}
+              extra={
+                editing
+                  ? '编码为唯一标识，修改模式下不允许变更'
+                  : '留空自动生成唯一编码（复制时请勿保留原编码）'
+              }
+            >
+              {/* 修改模式锁定只读：编码是唯一标识且被单据引用，改编码会导致关联数据错位 */}
+              <Input placeholder="留空自动生成唯一编码" disabled={!!editing} />
             </Form.Item>
             <Form.Item name="name" label="成品名称" style={{ flex: 1 }} rules={[{ required: true }]}>
               <Input />

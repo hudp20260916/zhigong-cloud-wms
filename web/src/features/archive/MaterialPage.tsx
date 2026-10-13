@@ -13,7 +13,7 @@ import {
   Tag,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -50,6 +50,8 @@ export default function MaterialPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Material | null>(null);
+  /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
+  const [copying, setCopying] = useState(false);
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -61,13 +63,17 @@ export default function MaterialPage() {
 
   function openCreate() {
     setEditing(null);
+    setCopying(false);
     form.resetFields();
     form.setFieldsValue({ unit: '个', safetyStock: 0, isVirtual: false });
     setOpen(true);
   }
 
+  /** 修改：带出全部字段；编码锁定只读（防重复编码与关联数据错位） */
   function openEdit(row: Material) {
     setEditing(row);
+    setCopying(false);
+    form.resetFields();
     form.setFieldsValue({
       code: row.code,
       name: row.name,
@@ -82,15 +88,36 @@ export default function MaterialPage() {
     setOpen(true);
   }
 
+  /** 复制：带出全部字段，编码置空由服务端按规则生成，名称加「-副本」区分 */
+  function openCopy(row: Material) {
+    setEditing(null);
+    setCopying(true);
+    form.resetFields();
+    form.setFieldsValue({
+      code: '',
+      name: `${row.name}-副本`,
+      spec: row.spec,
+      category: row.category,
+      unit: row.unit,
+      defaultSupplierId: row.default_supplier_id ?? undefined,
+      safetyStock: row.safety_stock,
+      isVirtual: row.is_virtual === 1,
+      remark: row.remark,
+    });
+    setOpen(true);
+  }
+
   async function submit() {
     const v = await form.validateFields();
+    // 复制模式不提交编码，交服务端按规则生成；修改模式编码只读、原样回传
+    const payload = copying ? { ...v, code: undefined } : v;
     try {
       if (editing) {
-        await archiveApi.updateMaterial(editing.id, v);
+        await archiveApi.updateMaterial(editing.id, payload);
         message.success('物料已更新');
       } else {
-        await archiveApi.createMaterial(v);
-        message.success('物料已创建');
+        await archiveApi.createMaterial(payload);
+        message.success(copying ? '物料副本已创建' : '物料已创建');
       }
       setOpen(false);
       reload();
@@ -178,13 +205,21 @@ export default function MaterialPage() {
           },
           {
             title: '操作',
-            width: 130,
+            width: 190,
             fixed: 'right',
             render: (_, r) => (
               <PermGate permission="archive.material.manage">
                 <Space size={4}>
                   <Button type="link" size="small" onClick={() => openEdit(r)}>
                     修改
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => openCopy(r)}
+                  >
+                    复制
                   </Button>
                   <Popconfirm
                     title="确认删除该物料？"
@@ -212,15 +247,20 @@ export default function MaterialPage() {
 
       <Modal
         open={open}
-        title={editing ? '修改物料' : '新增物料'}
+        title={editing ? '修改物料' : copying ? '复制物料' : '新增物料'}
         onCancel={() => setOpen(false)}
         onOk={submit}
         width={560}
         destroyOnClose
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item name="code" label="物料编码">
-            <Input placeholder="留空自动生成" />
+          <Form.Item
+            name="code"
+            label="物料编码"
+            extra={editing ? '编码为唯一标识，修改模式下不允许变更' : '留空自动生成唯一编码'}
+          >
+            {/* 修改模式锁定只读，避免改编码造成关联数据错位或编码重复 */}
+            <Input placeholder="留空自动生成" disabled={!!editing} />
           </Form.Item>
           <Form.Item name="name" label="物料名称" rules={[{ required: true, message: '请输入物料名称' }]}>
             <Input />

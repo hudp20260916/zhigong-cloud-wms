@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { PermGate, ResponsiveTable, DockAction, ImportExcelModal } from '../../components';
@@ -25,31 +25,60 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Partner | null>(null);
+  /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
+  const [copying, setCopying] = useState(false);
   const [form] = Form.useForm();
 
   function openCreate() {
     setEditing(null);
+    setCopying(false);
     form.resetFields();
     setOpen(true);
   }
 
+  /** 修改：带出全部字段；编码锁定只读（防重复编码） */
   function openEdit(row: Partner) {
     setEditing(row);
-    form.setFieldsValue(row);
+    setCopying(false);
+    form.resetFields();
+    form.setFieldsValue({
+      code: row.code,
+      name: row.name,
+      contact: row.contact,
+      phone: row.phone,
+      remark: row.remark,
+    });
+    setOpen(true);
+  }
+
+  /** 复制：带出全部字段，编码置空由服务端自动生成，名称加「-副本」区分 */
+  function openCopy(row: Partner) {
+    setEditing(null);
+    setCopying(true);
+    form.resetFields();
+    form.setFieldsValue({
+      code: '',
+      name: `${row.name}-副本`,
+      contact: row.contact,
+      phone: row.phone,
+      remark: row.remark,
+    });
     setOpen(true);
   }
 
   async function submit() {
     const v = await form.validateFields();
+    // 复制模式不提交编码，交服务端按规则生成；修改模式编码只读、原样回传
+    const payload = copying ? { ...v, code: undefined } : v;
     try {
       if (editing) {
-        if (isSupplier) await archiveApi.updateSupplier(editing.id, v);
-        else await archiveApi.updateCustomer(editing.id, v);
+        if (isSupplier) await archiveApi.updateSupplier(editing.id, payload);
+        else await archiveApi.updateCustomer(editing.id, payload);
         message.success(`${label}已更新`);
       } else {
-        if (isSupplier) await archiveApi.createSupplier(v);
-        else await archiveApi.createCustomer(v);
-        message.success(`${label}已创建`);
+        if (isSupplier) await archiveApi.createSupplier(payload);
+        else await archiveApi.createCustomer(payload);
+        message.success(copying ? `${label}副本已创建` : `${label}已创建`);
       }
       setOpen(false);
       reload();
@@ -109,12 +138,20 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
           { title: '备注', dataIndex: 'remark' },
           {
             title: '操作',
-            width: 130,
+            width: 190,
             render: (_, r) => (
               <PermGate permission="archive.partner.manage">
                 <Space size={0}>
                   <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
+                    修改
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => openCopy(r)}
+                  >
+                    复制
                   </Button>
                   <Popconfirm
                     title={`确认删除该${label}？`}
@@ -142,14 +179,23 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
 
       <Modal
         open={open}
-        title={editing ? `编辑${label}` : `新增${label}`}
+        title={editing ? `修改${label}` : copying ? `复制${label}` : `新增${label}`}
         onCancel={() => setOpen(false)}
         onOk={submit}
         destroyOnClose
       >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item name="code" label={`${label}编码`}>
-            <Input placeholder="留空自动生成" />
+          <Form.Item
+            name="code"
+            label={`${label}编码`}
+            extra={
+              editing
+                ? '编码为唯一标识，修改模式下不允许变更'
+                : '留空自动生成唯一编码'
+            }
+          >
+            {/* 修改模式锁定只读，避免改编码造成关联数据错位或编码重复 */}
+            <Input placeholder="留空自动生成" disabled={!!editing} />
           </Form.Item>
           <Form.Item name="name" label={`${label}名称`} rules={[{ required: true }]}>
             <Input />
