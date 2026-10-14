@@ -110,11 +110,17 @@ workOrderRouter.get('/options', requirePerm('production.wo.view'), (req, res) =>
 });
 
 /**
- * 去入库预填（按领料情况分流）。
+ * 去入库预填（两条入库路径并存，优先走已领料）。
  *
- * - 已领部分物料 → 「生产入库（已领料）」：入库数 = 实际已领可入库余量（issued − received），
- *   自动回填并锁定只读，未领部分不再处理。
- * - 未领物料     → 「成品入库（直接扣料）」：按工单应发数量（计划量 − 已入库）直接扣减物料库存。
+ * - 路径一「生产入库（已领料）」：还有「已领未入」的余量（issued − received > 0）时优先走它，
+ *   入库数 = 该余量，自动回填并锁定只读（料已领了，必须先入掉）。
+ * - 路径二「成品入库（直接扣料）」：已领部分已全部入库、但计划量还没入满时走它，
+ *   按工单应发数量（计划量 − 已入库）直接扣减物料库存，数量可分批调整。
+ *
+ * ⚠️ 早期版本用 `issued_qty > 0` 作为分流条件，只要领过料就锁死在路径一，
+ *    一旦「已领 == 已入」就直接 409，把剩下的未领部分也一起堵死了 ——
+ *    例：计划 210 / 已领 50 / 已入 50，明明还剩 160 未入，却报「已领部分已全部入库」。
+ *    正确条件是「还有未入的已领量」，而不是「有没有领过料」。
  */
 workOrderRouter.get('/:id/for-receipt', requirePerm('production.receipt.create'), (req, res) => {
   const id = Number(req.params.id);
@@ -126,11 +132,9 @@ workOrderRouter.get('/:id/for-receipt', requirePerm('production.receipt.create')
     .get(id) as any;
   if (!wo) throw Err.notFound('生产工单不存在');
 
-  // ---------- 分支一：已领部分物料 ----------
-  if (Number(wo.issued_qty) > 0) {
-    const avail = availableToReceive(id); // = 累计有效领料 − 已入库（已扣退料与不良）
-    if (avail <= 0) throw Err.conflict('该工单已领部分已全部入库，无可入库余量');
-
+  // ---------- 路径一：还有「已领未入」的余量 ----------
+  const avail = availableToReceive(id); // = 累计有效领料 − 已入库（已扣退料与不良）
+  if (avail > 0) {
     // 只有唯一一张有效领料单时才回填关联领料单，便于追溯；
     // 多张领料单时留空，由服务端按「工单累计可入库余量」锁定，避免只按单张领料单算少。
     const issues = db
@@ -150,7 +154,7 @@ workOrderRouter.get('/:id/for-receipt', requirePerm('production.receipt.create')
     return;
   }
 
-  // ---------- 分支二：未领物料，直接扣料 ----------
+  // ---------- 路径二：已领部分已入满（或从未领料），按计划剩余量直接扣料 ----------
   const remain = Math.max(0, Number(wo.plan_qty) - Number(wo.received_qty));
   if (remain <= 0) throw Err.conflict('该工单已全部入库');
   ok(res, {
@@ -223,6 +227,19 @@ workOrderRouter.put('/:id', requirePerm('production.wo.update'), (req, res) => {
   tx(() => {
     const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(id) as any;
     if (!wo) throw Err.notFound('生产工单不存在');
+
+    // 主产品锁定：已领料或已入库的工单不允许更换主产品。
+    // 领料明细与入库流水都是按「工单主产品的 BOM」展开的，换了产品会导致
+    // 已扣的物料、已入的成品对不上账（旧产品的料已扣、新产品的料没扣）。
+    const issuedNow = Number(wo.issued_qty) || 0;
+    const receivedNow = Number(wo.received_qty) || 0;
+    if ((issuedNow > 0 || receivedNow > 0) && Number(d.productId) !== Number(wo.product_id)) {
+      throw Err.conflict('该工单已发生领料或入库，不允许更换主产品', {
+        issuedQty: issuedNow,
+        receivedQty: receivedNow,
+      });
+    }
+
     // 不因「已完工」拒绝编辑：把计划量改到等于已入库量时工单会立刻判完工，
     // 若此时再禁止编辑，就再也调不大、无法追加生产，等于把单据锁死。
     // 真正要守住的是下面的计划量下限，改大改小都受它约束。

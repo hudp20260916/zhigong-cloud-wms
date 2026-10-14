@@ -63,6 +63,11 @@ export default function WorkOrderPage() {
    * 否则会出现「领了 100、入了 100，计划却写成 50」的账实倒挂。
    */
   const [editFloor, setEditFloor] = useState<{ issued: number; received: number; min: number } | null>(null);
+  /**
+   * 编辑态是否锁定主产品：已领料或已入库的工单不能换产品。
+   * 领料明细 / 入库流水都是按原主产品的 BOM 展开的，换产品会让已扣物料与已入成品对不上账。
+   */
+  const [productLocked, setProductLocked] = useState(false);
   const [form] = Form.useForm();
 
   // 选中行从当前列表实时取：翻页/刷新后旧的 selectedId 天然失效，
@@ -108,6 +113,8 @@ export default function WorkOrderPage() {
       const issued = Number(detail.issued_qty ?? 0);
       const received = Number(detail.received_qty ?? 0);
       setEditFloor({ issued, received, min: Math.max(issued, received) });
+      // 未领料且未开始入库的工单不受限制，可以随便换产品
+      setProductLocked(issued > 0 || received > 0);
       setPendingDetail({
         productId: detail.product_id,
         planQty: detail.plan_qty,
@@ -146,6 +153,7 @@ export default function WorkOrderPage() {
     setPendingDetail(null);
     setDetailLoading(false);
     setEditFloor(null);
+    setProductLocked(false);
     form.resetFields();
   }
 
@@ -163,9 +171,11 @@ export default function WorkOrderPage() {
    * - 入库已满（remainQty <= 0）  → 阻止「去入库」「去领料」（料已够、无需再领/再入）
    * - 已发生领料或入库            → 阻止「删除」（后端 delete 硬性要求两者都为 0）
    * - 已完工                      → 阻止除编辑外的写操作（已入满，无需再领/再入，也不许删）
-   * - 已领部分已全部入库          → 阻止「去入库」：去入库按「实际已领数量」入库且未领部分不再处理，
-   *                                 已领部分若已入满则本单无可再入数量（需先继续领料）
    * 打印是只读操作，不设状态门槛。
+   *
+   * ⚠️ 「去入库」**不再**额外判断「已领部分是否已入满」：它与后端 for-receipt 是两条路径，
+   *    已领部分入满后还有「未领部分直接扣料」这条路可走（例：计划 210 / 已领 50 / 已入 50
+   *    仍可再入 160）。前端只拦「计划量已入满」这一种真的没余量的情况。
    */
   function blockReason(row: any, action: WoAction): string | null {
     if (action === 'print') return null;
@@ -181,11 +191,6 @@ export default function WorkOrderPage() {
       (Number(row.issued_qty ?? 0) > 0 || Number(row.received_qty ?? 0) > 0)
     )
       return '已发生领料或入库，禁止删除';
-    if (action === 'receive') {
-      const issued = Number(row.issued_qty ?? 0);
-      const received = Number(row.received_qty ?? 0);
-      if (issued > 0 && issued - received <= 0) return '已领部分已全部入库';
-    }
     return null;
   }
 
@@ -216,6 +221,11 @@ export default function WorkOrderPage() {
         message.error(
           `计划数量不得低于 ${editFloor.min}（已领料 ${editFloor.issued}，已入库 ${editFloor.received}）`,
         );
+        return;
+      }
+      // 主产品锁定：与后端 PUT 同口径兜底（控件已 disabled，这里是防绕过 / 防脏数据）
+      if (productLocked && pendingDetail && Number(v.productId) !== Number(pendingDetail.productId)) {
+        message.error('该工单已发生领料或入库，不允许更换主产品');
         return;
       }
       const payload = {
@@ -465,10 +475,20 @@ export default function WorkOrderPage() {
             （如日期传了字符串）会在渲染期抛错并让整页白屏。包一层后只这块降级成错误提示。 */}
         <ErrorBoundary label="工单表单">
         <Form form={form} layout="vertical" preserve={false} disabled={detailLoading}>
-          <Form.Item name="productId" label="主产品" rules={[{ required: true, message: '请选择主产品' }]}>
+          <Form.Item
+            name="productId"
+            label="主产品"
+            extra={
+              productLocked
+                ? '该工单已发生领料或入库，主产品不可更换（领料与入库流水均按原产品的 BOM 展开）'
+                : undefined
+            }
+            rules={[{ required: true, message: '请选择主产品' }]}
+          >
             <Select
               showSearch
               optionFilterProp="label"
+              disabled={productLocked}
               options={products.map((p) => ({ value: p.id, label: `${p.code} ${p.name}` }))}
             />
           </Form.Item>

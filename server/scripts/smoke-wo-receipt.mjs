@@ -119,8 +119,24 @@ async function main() {
   const wo2After = D(await call('GET', `/production/work-orders/${wo2.id}`));
   assert('WO2 已领 60 / 已入 60', Number(wo2After.issued_qty) === 60 && Number(wo2After.received_qty) === 60, wo2After);
 
+  // 已领部分已入满、但计划量还没入满 → 仍要走「直接扣料」继续入未领部分
+  // （早期版本在这里直接 409，把剩下的计划量一起堵死了，WO20261013-0030 就是这么被拦的）
   const fr2b = await call('GET', `/production/work-orders/${wo2.id}/for-receipt`);
-  assert('已领部分已全部入库 → 再次去入库被拒（409）', fr2b.status === 409, fr2b.body);
+  const d2b = fr2b.body?.data ?? {};
+  assert('已领部分入满后 → 放行（200）', fr2b.status === 200, fr2b.body);
+  assert('已领部分入满后 → 改走「成品入库（直接扣料）」', d2b.receiptType === '成品入库（直接扣料）', d2b);
+  assert('已领部分入满后 → 建议数 = 40（计划 100 − 已入 60）', d2b.suggestQty === 40, d2b);
+  assert('已领部分入满后 → 数量不锁定（可分批）', d2b.locked === false, d2b);
+
+  const r2b = await call('POST', '/production/receipts', {
+    receiptType: '成品入库（直接扣料）', woId: wo2.id, issueId: null, receiptDate: today,
+    items: [{ productId, qty: 40 }], skipProductIds: [], remark: 'smoke',
+  });
+  assert('未领部分继续入库 40 成功', r2b.status === 200, r2b.body);
+  const wo2Done = D(await call('GET', `/production/work-orders/${wo2.id}`));
+  assert('WO2 累计入库 100 = 计划量', Number(wo2Done.received_qty) === 100, wo2Done);
+  const fr2c = await call('GET', `/production/work-orders/${wo2.id}/for-receipt`);
+  assert('计划量入满后 → 去入库才被拒（409）', fr2c.status === 409, fr2c.body);
 
   // =========================================================
   // 场景三：多张领料单 → 不回填 issueId，按工单累计可入库余量锁定

@@ -135,7 +135,26 @@ async function main() {
   const del = await call('DELETE', `/production/work-orders/${wo.id}`);
   assert('已发生领料/入库的工单 → 删除被拒（409）', del.status === 409, del.body);
 
-  // ---------- 回归：未开工工单仍可自由编辑 ----------
+  // ---------- 主产品锁定：已领料 / 已入库的工单不允许换产品 ----------
+  console.log('\n[主产品锁定] 已发生领料或入库 → 不可更换主产品');
+  const productId2 = D(await call('POST', '/archive/products', {
+    name: `冒烟成品2-${Date.now()}`, unit: '台', safetyStock: 0, bomVersion: 'V1.0',
+    bom: [{ materialId, qty: 1 }], confirmNoBom: false,
+  })).id;
+  assert('创建第二个成品用于换产品测试', !!productId2);
+
+  const swap = await call('PUT', `/production/work-orders/${wo.id}`, {
+    productId: productId2, planQty: 150, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
+  });
+  assert('已领料且已入库的工单换主产品 → 409 拒绝', swap.status === 409, swap.body);
+  assert('提示明确说明不允许更换主产品', msg(swap).includes('不允许更换主产品'), msg(swap));
+
+  const keepSame = await call('PUT', `/production/work-orders/${wo.id}`, {
+    productId, planQty: 160, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
+  });
+  assert('不换产品、只改计划量 → 仍允许（不影响其它编辑）', keepSame.status === 200, keepSame.body);
+
+  // ---------- 回归：未开工工单仍可自由编辑（含换产品） ----------
   console.log('\n[回归] 未开工工单编辑不受影响');
   const fresh = D(await call('POST', '/production/work-orders', {
     productId, planQty: 50, bomVersion: 'V1.0', planStart: '', planEnd: '', remark: 'smoke-fresh',
@@ -146,6 +165,13 @@ async function main() {
   assert('未开工工单改计划量 50 → 80 成功', up.status === 200, up.body);
   const freshAfter = D(await call('GET', `/production/work-orders/${fresh.id}`));
   assert('改后计划量 = 80', Number(freshAfter.plan_qty) === 80, freshAfter);
+
+  const swapFresh = await call('PUT', `/production/work-orders/${fresh.id}`, {
+    productId: productId2, planQty: 80, bomVersion: 'V1.0', planStart: '', planEnd: '', remark: 'smoke',
+  });
+  assert('未领料未入库的工单 → 允许更换主产品', swapFresh.status === 200, swapFresh.body);
+  const swapped = D(await call('GET', `/production/work-orders/${fresh.id}`));
+  assert('主产品已换成第二个成品', Number(swapped.product_id) === productId2, swapped);
   const del2 = await call('DELETE', `/production/work-orders/${fresh.id}`);
   assert('未发生业务的工单可删除', del2.status === 200, del2.body);
 
