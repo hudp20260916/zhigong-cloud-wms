@@ -1,21 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Button,
   Card,
   DatePicker,
+  Divider,
   Form,
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Select,
   Space,
-  Table,
-  Tag,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  ExportOutlined,
+  ImportOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -39,7 +43,16 @@ export default function WorkOrderPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  /** 列表当前选中的工单 id——顶部操作按钮作用于它 */
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [form] = Form.useForm();
+
+  // 选中行从当前列表实时取：翻页/刷新后旧的 selectedId 天然失效，
+  // 避免对一条已经不在当前页的数据执行写操作
+  const selected = useMemo(
+    () => list.find((r) => r.id === selectedId) ?? null,
+    [list, selectedId],
+  );
 
   useEffect(() => {
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
@@ -79,6 +92,45 @@ export default function WorkOrderPage() {
     setOpen(true);
   }
 
+  /** 顶部操作按钮的类型 */
+  type WoAction = 'print' | 'receive' | 'issue' | 'edit' | 'delete';
+
+  /**
+   * 状态联动校验：返回 null 表示允许执行，否则返回提示文案并阻止执行。
+   *
+   * 口径与后端 workOrders.ts 的 canEdit / canReceive 保持一致：
+   * - 已完工（status = '已完工'） → 阻止一切写操作
+   * - 入库已满（remainQty <= 0）  → 阻止「去入库」「去领料」（料已够、无需再领/再入）
+   * - 已领料（issued_qty > 0）    → 阻止「编辑」「删除」（后端 canEdit 亦要求 issued_qty = 0）
+   * 打印是只读操作，不设状态门槛。
+   */
+  function blockReason(row: any, action: WoAction): string | null {
+    if (action === 'print') return null;
+    if (row.status === '已完工') return '已完工';
+    const remain = Number(row.remainQty ?? 0);
+    if ((action === 'receive' || action === 'issue') && remain <= 0) return '已入库完成';
+    if ((action === 'edit' || action === 'delete') && Number(row.issued_qty ?? 0) > 0)
+      return '已领料完成';
+    return null;
+  }
+
+  /**
+   * 顶部按钮统一入口：先校验「已选中」与「状态允许」，
+   * 通过后把该行数据交给 fn 执行（回调里拿到的 row 一定非空）。
+   */
+  function runAction(action: WoAction, fn: (row: any) => void) {
+    if (!selected) {
+      message.warning('请先选择一条工单');
+      return;
+    }
+    const reason = blockReason(selected, action);
+    if (reason) {
+      message.warning(reason);
+      return;
+    }
+    fn(selected);
+  }
+
   async function submit() {
     const v = await form.validateFields();
     try {
@@ -95,6 +147,7 @@ export default function WorkOrderPage() {
         message.success('生产工单已创建');
       }
       setOpen(false);
+      setSelectedId(null); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -145,6 +198,91 @@ export default function WorkOrderPage() {
         onReset={() =>
           patchParams({ keyword: '', statusFilter: '', dateFrom: '', dateTo: '' })
         }
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。 */
+          <Space size={8} wrap>
+            {/* 打印沿用 PrintButton：服务端渲染 + 弹窗被拦截时的提示逻辑都不变。
+                未选中行时在捕获阶段拦下点击，只提示、不打开打印窗口。 */}
+            <span
+              onClickCapture={(e) => {
+                if (!selected) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  message.warning('请先选择一条工单');
+                }
+              }}
+              onClick={() => {
+                // 打印为只读操作，与其它操作统一收尾：清选中 + 刷新
+                setSelectedId(null);
+                reload();
+              }}
+            >
+              <PrintButton docType="work_order" id={selected?.id ?? 0} type="default" />
+            </span>
+
+            <Button
+              size="small"
+              icon={<ImportOutlined />}
+              onClick={() =>
+                runAction('receive', (row) =>
+                  navigate('/production/receipts', { state: { workOrderId: row.id } }),
+                )
+              }
+            >
+              去入库
+            </Button>
+
+            <Button
+              size="small"
+              icon={<ExportOutlined />}
+              onClick={() =>
+                runAction('issue', (row) =>
+                  navigate('/production/issues', { state: { workOrderId: row.id } }),
+                )
+              }
+            >
+              去领料
+            </Button>
+
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => runAction('edit', (row) => void openEdit(row))}
+            >
+              编辑
+            </Button>
+
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() =>
+                runAction('delete', (row) => {
+                  Modal.confirm({
+                    title: '确认删除该工单？',
+                    content: `工单「${row.wo_no}」删除后不可恢复。`,
+                    okText: '确认删除',
+                    okButtonProps: { danger: true },
+                    cancelText: '取消',
+                    onOk: async () => {
+                      try {
+                        await productionApi.deleteWorkOrder(row.id);
+                        message.success('已删除');
+                        setSelectedId(null);
+                        reload();
+                      } catch (e: any) {
+                        message.error(e.message);
+                      }
+                    },
+                  });
+                })
+              }
+            >
+              删除
+            </Button>
+          </Space>
+        }
       >
         <DatePicker
           style={{ width: 140 }}
@@ -185,6 +323,21 @@ export default function WorkOrderPage() {
           onChange: (page, pageSize) => patchParams({ page, pageSize }),
           showSizeChanger: true,
         }}
+        // 桌面端单选：顶部按钮作用于选中行
+        rowSelection={{
+          type: 'radio',
+          selectedRowKeys: selectedId == null ? [] : [selectedId],
+          onChange: (keys) => setSelectedId(keys.length ? Number(keys[0]) : null),
+          columnWidth: 44,
+        }}
+        // 选中行高亮（双主题自适应，见 styles.css 的 .wo-row-selected）
+        rowClassName={(r) => (r.id === selectedId ? 'wo-row-selected' : '')}
+        onRow={(r) => ({
+          onClick: () => setSelectedId(r.id === selectedId ? null : r.id),
+        })}
+        // 卡片模式下 rowSelection 不生效，显式传 key 让卡片也能高亮；点击卡片即选中
+        selectedRowKeys={selectedId == null ? [] : [selectedId]}
+        onRowClick={(row) => setSelectedId(row.id === selectedId ? null : row.id)}
         columns={[
           { title: '工单编号', dataIndex: 'wo_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '主产品', dataIndex: 'product_name', width: 180 },
@@ -202,63 +355,6 @@ export default function WorkOrderPage() {
             render: (v) => <span style={{ color: Number(v) > 0 ? '#cf1322' : undefined }}>{v}</span>,
           },
           { title: '状态', dataIndex: 'status', width: 100, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 220,
-            fixed: 'right',
-            render: (_, r) => (
-              <Space size={0}>
-                <PrintButton docType="work_order" id={r.id} />
-                {/* 需求 4.6：工单列表「去入库」仅对未领料工单开放 */}
-                {r.canReceive && (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => navigate('/production/receipts', { state: { workOrderId: r.id } })}
-                  >
-                    去入库
-                  </Button>
-                )}
-                {/* 去领料/去入库 统一按「计划尚未入库满」判定（remain = plan - received > 0）。
-                    完工口径 = 实际入库量 == 计划量，不要求领料；因此对「不领料直接入库」的工单，
-                    满量后 remain=0，两按钮一起隐藏，不会把合法满量单误判成"未领料算未完工"。
-                    需求 9：领了部分料但还没入库满 → remain>0，去领料仍亮，可继续领剩下的料。 */}
-                {Number(r.remainQty ?? 0) > 0 && (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => navigate('/production/issues', { state: { workOrderId: r.id } })}
-                  >
-                    去领料
-                  </Button>
-                )}
-                {r.canEdit && (
-                  <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
-                  </Button>
-                )}
-                {r.canEdit && (
-                  <Popconfirm
-                    title="确认删除该工单？"
-                    onConfirm={async () => {
-                      try {
-                        await productionApi.deleteWorkOrder(r.id);
-                        message.success('已删除');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                )}
-                {!r.canReceive && !r.canEdit && <Tag>已开工</Tag>}
-              </Space>
-            ),
-          },
         ]}
       />
 

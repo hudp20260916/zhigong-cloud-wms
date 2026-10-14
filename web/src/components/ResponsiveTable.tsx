@@ -11,6 +11,14 @@ export interface ResponsiveTableProps extends Omit<TableProps<any>, 'columns'> {
   subtitleKey?: string;
   /** 空态文案 */
   emptyText?: string;
+  /**
+   * 卡片模式下的行点击回调（仅 ≤768px 生效）。
+   * 桌面端行选中由 antd 的 rowSelection 处理，卡片模式无法复用它
+   * —— 所以调用方想在小屏上「点卡片选中」时传这个即可，不传则行为与以前一致。
+   */
+  onRowClick?: (row: any) => void;
+  /** 卡片模式下需要高亮的行 key（仅 ≤768px 生效） */
+  selectedRowKeys?: React.Key[];
 }
 
 function isOperationColumn(c: TableColumnType<any>): boolean {
@@ -34,6 +42,8 @@ export function ResponsiveTable({
   titleKey,
   subtitleKey,
   emptyText = '暂无数据',
+  onRowClick,
+  selectedRowKeys,
   ...rest
 }: ResponsiveTableProps) {
   const isMobile = useIsMobile();
@@ -95,8 +105,29 @@ export function ResponsiveTable({
         const titleNode = renderCell(titleCol, row, idx);
         const subNode = subCol ? renderCell(subCol, row, idx) : null;
 
+        // 卡片模式下 antd 的 rowSelection 不会生效，这里用 selectedRowKeys 自行判断高亮
+        const isSelected =
+          Array.isArray(selectedRowKeys) &&
+          selectedRowKeys.some((k) => String(k) === String(key));
+
         return (
-          <div className="mobile-card" key={key ?? idx}>
+          <div
+            className={`mobile-card${isSelected ? ' mobile-card--selected' : ''}`}
+            key={key ?? idx}
+            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            style={{
+              cursor: onRowClick ? 'pointer' : undefined,
+              // 用主题变量而非硬编码色，明暗主题自动适配；
+              // 内联优先级最高，避免被 .theme-dark .mobile-card 覆盖
+              ...(isSelected
+                ? {
+                    background: 'var(--hl-soft)',
+                    borderColor: 'var(--hl)',
+                    boxShadow: 'inset 3px 0 0 var(--hl)',
+                  }
+                : null),
+            }}
+          >
             {notEmpty(titleNode) && <div className="mobile-card__title">{titleNode}</div>}
             {notEmpty(subNode) && <div className="mobile-card__sub">{subNode}</div>}
 

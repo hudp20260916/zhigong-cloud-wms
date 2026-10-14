@@ -40,3 +40,23 @@ body,
 .low-stock-row {
   background: #fff7f0;
 }
+
+/* ============================================================
+   列表行选中高亮：操作按钮集中到顶部后，用于标识「当前作用于哪一行」。
+   用 --hl / --hl-soft 主题变量，明暗主题自动适配。
+   ============================================================ */
+.ant-table-wrapper .ant-table-tbody > tr.wo-row-selected > td {
+  background: var(--hl-soft);
+}
+/* hover 时也要保持高亮，否则鼠标划过会「闪回」未选中态 */
+.ant-table-wrapper .ant-table-tbody > tr.wo-row-selected:hover > td {
+  background: var(--hl-soft);
+}
+/* 左侧色条，让选中态比单纯浅色背景更醒目 */
+.ant-table-wrapper .ant-table-tbody > tr.wo-row-selected > td:first-child {
+  box-shadow: inset 3px 0 0 var(--hl);
+}
+
+.mobile-card--selected {
+  border-color: var(--hl);
+}

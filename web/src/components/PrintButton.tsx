@@ -11,16 +11,19 @@ export function PrintButton({
   docType,
   id,
   size = 'small',
+  type = 'link',
   label = '打印',
 }: {
   docType: string;
   id: number;
   size?: 'small' | 'middle' | 'large';
+  /** 默认 link（行内轻量样式）；移到顶部按钮组时可传 'default' 与其它按钮视觉一致 */
+  type?: 'link' | 'text' | 'default' | 'primary' | 'dashed';
   label?: string;
 }) {
   return (
     <Button
-      type="link"
+      type={type}
       size={size}
       icon={<PrinterOutlined />}
       onClick={() => {
