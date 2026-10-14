@@ -12,14 +12,30 @@ export interface ResponsiveTableProps extends Omit<TableProps<any>, 'columns'> {
   /** 空态文案 */
   emptyText?: string;
   /**
-   * 卡片模式下的行点击回调（仅 ≤768px 生效）。
-   * 桌面端行选中由 antd 的 rowSelection 处理，卡片模式无法复用它
-   * —— 所以调用方想在小屏上「点卡片选中」时传这个即可，不传则行为与以前一致。
+   * 「点行任意位置即选中」回调（桌面端表格行 + ≤768px 卡片**同时生效**）。
+   *
+   * 之前只有卡片模式实现了它，桌面端必须点行首的单选圆点才能选中，
+   * 造成同一套「先选中、再点顶部按钮」的交互在两块屏幕上不一致，
+   * 所以下沉到组件里统一：桌面走 antd 的 onRow，卡片走 div onClick，
+   * 两处共用同一套「自身可交互元素不触发选中」的排除规则。
    */
   onRowClick?: (row: any) => void;
-  /** 卡片模式下需要高亮的行 key（仅 ≤768px 生效） */
+  /** 需要高亮的行 key（桌面端加 `row-selected`，卡片模式走 `mobile-card--selected`） */
   selectedRowKeys?: React.Key[];
 }
+
+/**
+ * 行内「自身可交互」的元素：点它们不应触发行选中。
+ *
+ * 覆盖三类：
+ * - 表单控件与按钮类（button / a / input / textarea / select / label / [role=button]）
+ * - 表格自带控件（展开箭头 .ant-table-row-expand-icon、勾选列 .ant-table-selection-column）
+ * - 逃生舱：业务组件不想被行选中接管时自己加 `data-row-click-ignore`
+ */
+export const ROW_CLICK_IGNORE =
+  'button, a, input, textarea, select, label, [role="button"], ' +
+  '.ant-table-row-expand-icon, .ant-table-selection-column, ' +
+  '.ant-checkbox-wrapper, .ant-radio-wrapper, [data-row-click-ignore]';
 
 function isOperationColumn(c: TableColumnType<any>): boolean {
   return c.title === '操作' || c.key === 'operation';
@@ -44,12 +60,56 @@ export function ResponsiveTable({
   emptyText = '暂无数据',
   onRowClick,
   selectedRowKeys,
+  rowClassName,
+  onRow,
   ...rest
 }: ResponsiveTableProps) {
   const isMobile = useIsMobile();
 
+  /** 取行 key：rowKey 可能是字段名也可能是函数（复合主键页会传函数） */
+  const keyOf = (row: any, idx: number): React.Key =>
+    typeof rowKey === 'function' ? (rowKey as any)(row, idx) : (row as any)[rowKey as string];
+
+  // 桌面端没有传 selectedRowKeys 时，退回 rowSelection.selectedRowKeys，
+  // 这样「只传了 rowSelection」的页面也能拿到高亮，不用每个页面补一遍
+  const keys: React.Key[] =
+    selectedRowKeys ?? ((rest as any).rowSelection?.selectedRowKeys as React.Key[]) ?? [];
+
   if (!isMobile) {
-    return <Table columns={columns} dataSource={dataSource} rowKey={rowKey} {...rest} />;
+    const isKeySelected = (row: any, idx: number) =>
+      Array.isArray(keys) && keys.some((k) => String(k) === String(keyOf(row, idx)));
+
+    // 与调用方自己的 rowClassName 合并，不能覆盖（库存页有 low-stock-row、台账页有 voided-row）
+    const mergedRowClassName = (row: any, idx: number, indent: number) => {
+      const base = typeof rowClassName === 'function' ? rowClassName(row, idx, indent) : rowClassName;
+      return [base, isKeySelected(row, idx) ? 'row-selected' : ''].filter(Boolean).join(' ');
+    };
+
+    // 与调用方自己的 onRow 合并（生产工单页之前就是自己写 onRow 实现点行选中）
+    const mergedOnRow = (row: any, idx?: number) => {
+      const base = (typeof onRow === 'function' ? onRow(row, idx as number) : onRow) ?? {};
+      if (!onRowClick) return base;
+      return {
+        ...base,
+        onClick: (e: React.MouseEvent) => {
+          const t = e.target as HTMLElement | null;
+          // 点展开箭头 / 勾选列 / 行内按钮链接时，只走它们自己的行为，不改变选中态
+          if (!t?.closest?.(ROW_CLICK_IGNORE)) onRowClick(row);
+          (base as any).onClick?.(e);
+        },
+      };
+    };
+
+    return (
+      <Table
+        columns={columns}
+        dataSource={dataSource}
+        rowKey={rowKey}
+        rowClassName={mergedRowClassName}
+        onRow={mergedOnRow}
+        {...rest}
+      />
+    );
   }
 
   const rows = (dataSource ?? []) as any[];
@@ -100,21 +160,26 @@ export function ResponsiveTable({
     <>
       <div className="mobile-card-list">
         {rows.map((row, idx) => {
-        const key =
-          typeof rowKey === 'function' ? (rowKey as any)(row) : (row as any)[rowKey as string];
+        const key = keyOf(row, idx);
         const titleNode = renderCell(titleCol, row, idx);
         const subNode = subCol ? renderCell(subCol, row, idx) : null;
 
         // 卡片模式下 antd 的 rowSelection 不会生效，这里用 selectedRowKeys 自行判断高亮
-        const isSelected =
-          Array.isArray(selectedRowKeys) &&
-          selectedRowKeys.some((k) => String(k) === String(key));
+        const isSelected = Array.isArray(keys) && keys.some((k) => String(k) === String(key));
 
         return (
           <div
             className={`mobile-card${isSelected ? ' mobile-card--selected' : ''}`}
             key={key ?? idx}
-            onClick={onRowClick ? () => onRowClick(row) : undefined}
+            onClick={
+              onRowClick
+                ? (e) => {
+                    // 与桌面端同一套排除规则：点卡片里的按钮 / 链接不改变选中态
+                    const t = e.target as HTMLElement | null;
+                    if (!t?.closest?.(ROW_CLICK_IGNORE)) onRowClick(row);
+                  }
+                : undefined
+            }
             style={{
               cursor: onRowClick ? 'pointer' : undefined,
               // 用主题变量而非硬编码色，明暗主题自动适配；

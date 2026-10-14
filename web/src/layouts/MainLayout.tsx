@@ -21,6 +21,7 @@ import { BRAND_NAME } from '../brand';
 import { useAuthStore } from '../stores/auth';
 import { useThemeStore } from '../stores/theme';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { ErrorBoundary } from '../components';
 
 const { Sider, Header, Content } = Layout;
 
@@ -248,7 +249,14 @@ export default function MainLayout() {
           )}
         </Header>
         <Content style={{ padding: 16, overflow: 'auto', background: '#f5f6f8' }}>
-          <Outlet />
+          {/*
+            页面级兜底：任何页面在渲染期抛错，React 18 会卸载整棵树 → 整页白屏、
+            连报错原因都看不到（本系统踩过 DatePicker 收字符串、弹窗回填时序两次）。
+            包一层后至少显示错误摘要 + 重试；key 用 pathname，切走再回来会自动复位。
+          */}
+          <ErrorBoundary key={location.pathname} label="页面">
+            <Outlet />
+          </ErrorBoundary>
         </Content>
       </Layout>
     </Layout>

@@ -39,6 +39,7 @@ import {
   TopActionBar,
   RowActionButton,
   RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -54,8 +55,13 @@ export default function WorkOrderPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  /** 列表当前选中的工单 id——顶部操作按钮作用于它 */
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  /** 列表当前选中的工单——顶部操作按钮作用于它。
+      用全系统统一的 useRowSelect：桌面表格行 / 移动端卡片点任意位置即可选中，
+      行内按钮、链接、展开箭头不触发选中（排除规则在 ResponsiveTable 里统一维护）。 */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect(
+    (row: any) => row.id,
+    { columnWidth: 44 },
+  );
   /**
    * 弹窗待回填数据。
    * 不直接写表单，先存这里，等弹窗挂载完成后由下方 useEffect 统一回填——
@@ -307,7 +313,7 @@ export default function WorkOrderPage() {
         message.success('生产工单已创建');
       }
       closeModal();
-      setSelectedId(null); // 操作完成后清除选中，避免下次误点到同一行
+      clearSelection(); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
       // validateFields 失败时 e 是 { errorFields }，字段级红字已经提示过了，不再弹全局报错
@@ -370,7 +376,7 @@ export default function WorkOrderPage() {
             <span
               onClick={() => {
                 // 打印为只读操作，与其它操作统一收尾：清选中 + 刷新
-                setSelectedId(null);
+                clearSelection();
                 reload();
               }}
             >
@@ -447,7 +453,7 @@ export default function WorkOrderPage() {
                 try {
                   await productionApi.deleteWorkOrder(row.id);
                   message.success('已删除');
-                  setSelectedId(null);
+                  clearSelection();
                   reload();
                 } catch (e: any) {
                   message.error(e.message);
@@ -496,21 +502,11 @@ export default function WorkOrderPage() {
           onChange: (page, pageSize) => patchParams({ page, pageSize }),
           showSizeChanger: true,
         }}
-        // 桌面端单选：顶部按钮作用于选中行
-        rowSelection={{
-          type: 'radio',
-          selectedRowKeys: selectedId == null ? [] : [selectedId],
-          onChange: (keys) => setSelectedId(keys.length ? Number(keys[0]) : null),
-          columnWidth: 44,
-        }}
-        // 选中行高亮（双主题自适应，见 styles.css 的 .wo-row-selected）
-        rowClassName={(r) => (r.id === selectedId ? 'wo-row-selected' : '')}
-        onRow={(r) => ({
-          onClick: () => setSelectedId(r.id === selectedId ? null : r.id),
-        })}
-        // 卡片模式下 rowSelection 不生效，显式传 key 让卡片也能高亮；点击卡片即选中
+        // 单选：顶部按钮作用于选中行。高亮与「点行即选中」由 ResponsiveTable 统一处理
+        // （.row-selected 见 styles.css，双主题自适应）
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
         selectedRowKeys={selectedId == null ? [] : [selectedId]}
-        onRowClick={(row) => setSelectedId(row.id === selectedId ? null : row.id)}
         columns={[
           { title: '工单编号', dataIndex: 'wo_no', width: 160, render: (v) => <CopyableCode value={v} /> },
           { title: '主产品', dataIndex: 'product_name', width: 180 },

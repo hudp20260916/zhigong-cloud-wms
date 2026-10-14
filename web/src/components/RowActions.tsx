@@ -25,7 +25,10 @@ import { useAuthStore } from '../stores/auth';
  * @param keyOf 行主键取值函数，默认取 `row.id`。
  *   复合主键的表格（如预警页 rowKey 是 `itemType-id`）必须传，否则选中态对不上。
  */
-export function useRowSelect(keyOf: (row: any) => string | number = (row: any) => row.id) {
+export function useRowSelect(
+  keyOf: (row: any) => string | number = (row: any) => row.id,
+  options?: { columnWidth?: number },
+) {
   const [selectedId, setSelectedId] = useState<string | number | null>(null);
   return {
     selectedId,
@@ -36,9 +39,20 @@ export function useRowSelect(keyOf: (row: any) => string | number = (row: any) =
       type: 'radio' as const,
       selectedRowKeys: selectedId === null ? [] : ([selectedId] as Key[]),
       onChange: (keys: Key[]) => setSelectedId(keys.length ? (keys[0] as string | number) : null),
+      // 不传时走 antd 默认宽度；生产工单页显式传 44 保持原有列宽
+      columnWidth: options?.columnWidth,
     },
-    /** 移动端卡片模式：点卡片即选中（直接传给 ResponsiveTable） */
-    onRowClick: (row: any) => setSelectedId(row == null ? null : keyOf(row)),
+    /**
+     * 行点击回调（直接传给 ResponsiveTable）。
+     * ResponsiveTable 已统一处理桌面端表格行与移动端卡片两种形态，
+     * 并自动排除行内按钮 / 链接 / 展开箭头 / 勾选列，所以这里只管选中逻辑本身。
+     * 再点一次已选中的行 = 取消选中（与生产工单页原来的行为保持一致）。
+     */
+    onRowClick: (row: any) => {
+      if (row == null) return setSelectedId(null);
+      const k = keyOf(row);
+      setSelectedId((prev) => (prev !== null && String(prev) === String(k) ? null : k));
+    },
     /** 与 keyOf 配套：判断某行是否当前选中行 */
     isSelected: (row: any) => row != null && selectedId !== null && keyOf(row) === selectedId,
   };
