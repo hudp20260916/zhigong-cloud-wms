@@ -131,6 +131,7 @@ const PAGES = [
   'features/archive/PartnerPage',
   'features/inventory/StockPage',
   'features/inventory/InitialStockPage',
+  'features/inventory/TransferPage',
   'features/inventory/LedgerPage',
   'features/production/WorkOrderPage',
   'features/production/IssuePage',

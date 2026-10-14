@@ -5,6 +5,7 @@ import { db, nowIso, tx } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock } from '../../core/ledger.js';
+import { resolveWarehouse, stockOfWarehouse } from '../../core/warehouse.js';
 import { expandBom } from '../../core/bom.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
@@ -97,6 +98,8 @@ warehouseRouter.post('/material-sales', requirePerm('warehouse.materialSale.crea
       customerId: z.number().int().nullable().optional(),
       saleDate: z.string().min(1, '请选择销售日期'),
       items: z.array(materialItem).min(1, '请至少录入一条明细'),
+      /** 出库仓库：不传按物料默认仓（物料库） */
+      warehouseId: z.number().int().positive().nullable().optional(),
       remark: z.string().trim().optional().default(''),
     })
     .safeParse(req.body);
@@ -106,12 +109,13 @@ warehouseRouter.post('/material-sales', requirePerm('warehouse.materialSale.crea
   const id = tx(() => {
     const saleNo = nextCode('materialSale', d.saleDate);
     const totalAmount = d.items.reduce((s, i) => s + i.qty * i.price, 0);
+    const whId = resolveWarehouse('material', d.warehouseId ?? null);
     const info = db
       .prepare(
-        `INSERT INTO material_sales (sale_no, customer_id, sale_date, status, total_amount, operator_id, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
+        `INSERT INTO material_sales (sale_no, customer_id, sale_date, status, total_amount, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
-      .run(saleNo, d.customerId ?? null, d.saleDate, DOC_STATUS.VALID, totalAmount, req.ctx!.userId, d.remark, nowIso());
+      .run(saleNo, d.customerId ?? null, d.saleDate, DOC_STATUS.VALID, totalAmount, req.ctx!.userId, d.remark, whId, nowIso());
     const saleId = Number(info.lastInsertRowid);
     const ins = db.prepare(`INSERT INTO material_sale_items (sale_id, material_id, qty, price) VALUES (?,?,?,?)`);
     for (const it of d.items) ins.run(saleId, it.materialId, it.qty, it.price);
@@ -127,6 +131,7 @@ warehouseRouter.post('/material-sales', requirePerm('warehouse.materialSale.crea
         bizNo: saleNo,
         unitPrice: it.price,
         operatorId: req.ctx!.userId,
+        warehouseId: whId,
       })),
     );
     writeLog({
@@ -238,6 +243,8 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
       /** 领料来源时：本单不良品对应的成品数量（台/件），从工单可入库余量中核减 */
       produceQty: z.number().min(0).default(0),
       items: z.array(materialItem).min(1, '请至少录入一条不良品明细'),
+      /** 出库仓库：领料来源时不传则取原领料单所在仓，其次按物料默认仓（物料库） */
+      warehouseId: z.number().int().positive().nullable().optional(),
       remark: z.string().trim().optional().default(''),
     })
     .safeParse(req.body);
@@ -317,10 +324,11 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
       }
     }
 
+    const whId = resolveWarehouse('material', d.warehouseId ?? issue?.warehouse_id ?? null);
     const info = db
       .prepare(
-        `INSERT INTO defective_outs (out_no, out_date, status, operator_id, remark, created_at, source_type, issue_id, produce_qty)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO defective_outs (out_no, out_date, status, operator_id, remark, created_at, source_type, issue_id, produce_qty, warehouse_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         outNo,
@@ -332,6 +340,7 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
         d.sourceType,
         d.sourceType === 'issue' ? d.issueId : null,
         d.sourceType === 'issue' ? d.produceQty : 0,
+        whId,
       );
     const outId = Number(info.lastInsertRowid);
     const ins = db.prepare(`INSERT INTO defective_out_items (out_id, material_id, qty, reason) VALUES (?,?,?,?)`);
@@ -347,6 +356,7 @@ warehouseRouter.post('/defectives', requirePerm('warehouse.defective.create'), (
         bizId: outId,
         bizNo: outNo,
         operatorId: req.ctx!.userId,
+        warehouseId: whId,
       })),
     );
 
@@ -492,6 +502,8 @@ warehouseRouter.post('/checks', requirePerm('warehouse.check.create'), (req, res
           }),
         )
         .min(1, '请至少录入一条实盘数据'),
+      /** 盘点哪个仓：不传按首个盘点对象的品类默认仓（物料→物料库、成品→成品库） */
+      warehouseId: z.number().int().positive().nullable().optional(),
       remark: z.string().trim().optional().default(''),
     })
     .safeParse(req.body);
@@ -500,22 +512,29 @@ warehouseRouter.post('/checks', requirePerm('warehouse.check.create'), (req, res
 
   const id = tx(() => {
     const checkNo = nextCode('stockCheck', d.checkDate);
+    // 指定仓 → 全单必须都能放进该仓（物料库放不下成品，反之亦然），逐条校验；
+    // 不指定 → warehouse_id 留 NULL，审核时各明细按自身品类归默认仓（兼容历史混合盘点单）。
+    const whId = d.warehouseId ? resolveWarehouse(d.items[0].itemType, d.warehouseId) : null;
+    if (whId) for (const it of d.items) resolveWarehouse(it.itemType, whId);
+
     const info = db
       .prepare(
-        `INSERT INTO stock_checks (check_no, check_date, status, operator_id, remark, created_at)
-         VALUES (?,?, '待审核',?,?,?)`,
+        `INSERT INTO stock_checks (check_no, check_date, status, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?, '待审核',?,?,?,?)`,
       )
-      .run(checkNo, d.checkDate, req.ctx!.userId, d.remark, nowIso());
+      .run(checkNo, d.checkDate, req.ctx!.userId, d.remark, whId, nowIso());
     const checkId = Number(info.lastInsertRowid);
 
     const ins = db.prepare(
       `INSERT INTO stock_check_items (check_id, item_type, item_id, book_qty, actual_qty, diff_qty) VALUES (?,?,?,?,?,?)`,
     );
     for (const it of d.items) {
-      const table = it.itemType === 'material' ? 'materials' : 'products';
-      const row = db.prepare(`SELECT current_stock FROM ${table} WHERE id = ?`).get(it.itemId) as any;
-      if (!row) throw Err.notFound('盘点对象不存在');
-      const book = Number(row.current_stock);
+      const exists = db
+        .prepare(`SELECT id FROM ${it.itemType === 'material' ? 'materials' : 'products'} WHERE id = ?`)
+        .get(it.itemId) as any;
+      if (!exists) throw Err.notFound('盘点对象不存在');
+      // 账面数量按「该仓」的存量，盘的是这个仓；未指定仓则按该品类默认仓
+      const book = stockOfWarehouse(it.itemType, it.itemId, resolveWarehouse(it.itemType, whId));
       ins.run(checkId, it.itemType, it.itemId, book, it.actualQty, it.actualQty - book);
     }
 
@@ -559,6 +578,7 @@ warehouseRouter.post('/checks/:id/audit', requirePerm('warehouse.check.audit'), 
         bizId: id,
         bizNo: check.check_no,
         operatorId: req.ctx!.userId,
+        warehouseId: check.warehouse_id ?? null,
         allowDuringCheck: true,
         allowNegative: true,
       }));

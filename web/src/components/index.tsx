@@ -19,6 +19,12 @@ import {
   visibleColumnsOf,
   useColumnHidden,
 } from './ColumnSettings';
+import {
+  WarehouseSelect,
+  useWarehouseOptions,
+  clearWarehouseOptionsCache,
+} from './WarehouseSelect';
+import type { WarehouseOption } from './WarehouseSelect';
 
 export {
   PrintButton,
@@ -42,7 +48,12 @@ export {
   columnOptionsOf,
   visibleColumnsOf,
   useColumnHidden,
+  // 多仓库：出入库表单的仓库选择与下拉数据源
+  WarehouseSelect,
+  useWarehouseOptions,
+  clearWarehouseOptionsCache,
 };
+export type { WarehouseOption };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
 export function PermGate({

@@ -7,6 +7,7 @@ import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock } from '../../core/ledger.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
+import { resolveWarehouse } from '../../core/warehouse.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
 import { countRows, parsePage } from '../../shared/query.js';
@@ -37,6 +38,8 @@ const createSchema = z.object({
   source: z.enum(['order', 'ocr']).default('order'),
   /** OCR 建单时带上识别请求号，用于把 ocr_logs 与最终入库单关联起来 */
   ocrRequestId: z.string().trim().optional(),
+  /** 入库仓库：不传按物料的默认仓（物料库）；OCR 建单通常也不传 */
+  warehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -173,12 +176,14 @@ purchaseReceiptRouter.post('/', requirePerm('purchase.receipt.create'), (req, re
 
     const receiptNo = nextCode('purchaseReceipt', d.receiptDate);
     const totalAmount = d.items.reduce((s, i) => s + i.qty * i.price, 0);
+    // 仓库：没传就按物料默认仓兜底，保证历史接口与 OCR 建单不受影响
+    const whId = resolveWarehouse('material', d.warehouseId ?? null);
 
     const info = db
       .prepare(
         `INSERT INTO purchase_receipts
-           (receipt_no, order_id, supplier_id, receipt_date, operator_id, status, source, total_amount, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+           (receipt_no, order_id, supplier_id, receipt_date, operator_id, status, source, total_amount, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         receiptNo,
@@ -190,6 +195,7 @@ purchaseReceiptRouter.post('/', requirePerm('purchase.receipt.create'), (req, re
         d.source,
         totalAmount,
         d.remark,
+        whId,
         nowIso(),
       );
 
@@ -224,6 +230,7 @@ purchaseReceiptRouter.post('/', requirePerm('purchase.receipt.create'), (req, re
         bizNo: undefined, // 入库单号前端不可见
         unitPrice: it.price,
         operatorId: ctx.userId,
+        warehouseId: whId,
       })),
     );
 

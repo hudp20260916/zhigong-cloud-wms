@@ -7,6 +7,7 @@ import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock } from '../../core/ledger.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
+import { resolveWarehouse } from '../../core/warehouse.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
 import { countRows, parsePage } from '../../shared/query.js';
@@ -25,6 +26,8 @@ const createSchema = z.object({
   supplierId: z.number().int().nullable().optional(),
   returnDate: z.string().min(1, '请选择退货日期'),
   items: z.array(itemSchema).min(1, '请至少录入一条退货明细'),
+  /** 退货仓库：不传优先退原入库单所在仓，其次按物料默认仓（物料库） */
+  warehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -98,20 +101,23 @@ purchaseReturnRouter.post('/', requirePerm('purchase.return.create'), (req, res)
 
   const id = tx(() => {
     let supplierId = d.supplierId ?? null;
+    let sourceWhId: number | null = null;
     if (d.receiptId) {
       const receipt = db.prepare(`SELECT * FROM purchase_receipts WHERE id = ?`).get(d.receiptId) as any;
       if (!receipt) throw Err.notFound('关联的入库单不存在');
       if (receipt.status !== DOC_STATUS.VALID) throw Err.conflict('该入库单已撤销，无法退货');
       supplierId = supplierId ?? receipt.supplier_id ?? null;
+      sourceWhId = receipt.warehouse_id ?? null;
     }
 
     const returnNo = nextCode('purchaseReturn', d.returnDate);
     const totalAmount = d.items.reduce((s, i) => s + i.qty * i.price, 0);
+    const whId = resolveWarehouse('material', d.warehouseId ?? sourceWhId);
 
     const info = db
       .prepare(
-        `INSERT INTO purchase_returns (return_no, receipt_id, supplier_id, return_date, operator_id, status, total_amount, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO purchase_returns (return_no, receipt_id, supplier_id, return_date, operator_id, status, total_amount, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         returnNo,
@@ -122,6 +128,7 @@ purchaseReturnRouter.post('/', requirePerm('purchase.return.create'), (req, res)
         DOC_STATUS.VALID,
         totalAmount,
         d.remark,
+        whId,
         nowIso(),
       );
     const returnId = Number(info.lastInsertRowid);
@@ -143,6 +150,7 @@ purchaseReturnRouter.post('/', requirePerm('purchase.return.create'), (req, res)
         bizNo: returnNo,
         unitPrice: it.price,
         operatorId: ctx.userId,
+        warehouseId: whId,
       })),
     );
 

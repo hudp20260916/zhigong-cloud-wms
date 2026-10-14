@@ -20,6 +20,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -37,6 +38,8 @@ export default function SaleDeliveryPage() {
   const [deliveryDate, setDeliveryDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [customers, setCustomers] = useState<any[]>([]);
+  /** 多仓库：从哪个仓出货；不传时服务端按成品默认仓（成品库）扣减 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -62,7 +65,7 @@ export default function SaleDeliveryPage() {
   async function submit() {
     if (!orderId) return message.warning('请选择销售开单');
     try {
-      await saleApi.createDelivery({ orderId, deliveryDate, remark });
+      await saleApi.createDelivery({ orderId, deliveryDate, remark, warehouseId: warehouseId ?? undefined });
       message.success('出库单已生成，成品库存已扣减');
       setOpen(false);
       reload();
@@ -90,7 +93,7 @@ export default function SaleDeliveryPage() {
             ], res.list ?? []);
           }}>导出</Button>
           <PermGate permission="sale.delivery.create">
-            <DockAction icon={<PlusOutlined />} onClick={() => { setOrderId(undefined); setDeliveryDate(today()); setRemark(''); setOpen(true); }}>一键出库</DockAction>
+            <DockAction icon={<PlusOutlined />} onClick={() => { setOrderId(undefined); setDeliveryDate(today()); setRemark(''); setWarehouseId(null); setOpen(true); }}>一键出库</DockAction>
           </PermGate>
         </Space>
       }
@@ -225,6 +228,15 @@ export default function SaleDeliveryPage() {
           <SearchableSelect style={{ width: '100%' }} placeholder="选择待出库的销售单" value={orderId} onChange={setOrderId}
             options={orders.map((o) => ({ value: o.id, label: `${o.order_no} · ${o.customer_name ?? '无客户'} · ${o.total_amount}` }))} />
           <DatePicker style={{ width: '100%' }} value={dayVal(deliveryDate)} onChange={(d) => setDeliveryDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>出货仓库</div>
+            <WarehouseSelect
+              itemType="product"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: '100%' }}
+            />
+          </div>
           <Input.TextArea rows={2} placeholder="备注" value={remark} onChange={(e) => setRemark(e.target.value)} />
         </Space>
       </Modal>

@@ -17,6 +17,7 @@ import {
   TopActionBar,
   RowActionButton,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -60,6 +61,8 @@ export default function MaterialReturnPage() {
   const [rows, setRows] = useState<ReturnRow[]>([]);
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
+  /** 多仓库：退入哪个仓；不传时服务端退回原领料单所在仓，其次物料默认仓 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -92,6 +95,7 @@ export default function MaterialReturnPage() {
     setIssueInfo(null);
     setRows([]);
     setRemark('');
+    setWarehouseId(null);
     setOpen(true);
   }
 
@@ -155,6 +159,7 @@ export default function MaterialReturnPage() {
         returnDate,
         returnQty,
         remark,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((r) => ({
           materialId: r.materialId,
           srcItemId: r.srcItemId,
@@ -343,6 +348,19 @@ export default function MaterialReturnPage() {
             }))}
           />
           <DatePicker value={dayVal(returnDate)} onChange={(d) => setReturnDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>退入仓库</div>
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+              showHint={!issueId}
+            />
+            {issueId && !warehouseId && (
+              <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>未选择时退回原领料单所在仓</div>
+            )}
+          </div>
         </Space>
 
         {issueInfo && (

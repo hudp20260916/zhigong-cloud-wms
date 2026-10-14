@@ -27,6 +27,7 @@ const PREFIXES = {
   defectiveOut: 'DO',
   simulate: 'SM',
   settlement: 'ST',
+  transfer: 'TR',
 } as const;
 
 export type CodeKind = keyof typeof PREFIXES;
@@ -48,6 +49,7 @@ export const CODE_KIND_LABELS: Record<CodeKind, string> = {
   defectiveOut: '不良品出库单',
   simulate: '排产模拟单',
   settlement: '付款单',
+  transfer: '仓库调拨单',
 };
 
 export const CODE_KINDS = Object.keys(PREFIXES) as CodeKind[];

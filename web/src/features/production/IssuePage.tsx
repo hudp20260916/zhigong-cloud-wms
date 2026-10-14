@@ -37,6 +37,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -62,6 +63,8 @@ export default function IssuePage() {
     null,
   );
   const [ceilingLoading, setCeilingLoading] = useState(false);
+  /** 多仓库：从哪个仓领料；不传时服务端按物料默认仓（物料库）扣减 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -113,7 +116,7 @@ export default function IssuePage() {
     }
     setSaving(true);
     try {
-      await productionApi.createIssue({ woId, issueDate, produceQty, remark });
+      await productionApi.createIssue({ woId, issueDate, produceQty, remark, warehouseId: warehouseId ?? undefined });
       message.success('领料成功，已按 BOM 展开并穿透虚拟件扣减实阶物料');
       setOpen(false);
       reload();
@@ -159,6 +162,7 @@ export default function IssuePage() {
                 setProduceQty(50);
                 setIssueDate(today());
                 setRemark('');
+                setWarehouseId(null);
                 setOpen(true);
               }}>新增领料</DockAction>
           </PermGate>
@@ -367,6 +371,14 @@ export default function IssuePage() {
             <DatePicker
               value={dayVal(issueDate)}
               onChange={(d) => setIssueDate(d ? d.format('YYYY-MM-DD') : today())}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+          <Form.Item label="领料仓库">
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
               style={{ width: '100%' }}
             />
           </Form.Item>

@@ -1,6 +1,7 @@
 import { db } from '../../db/index.js';
 import { BizError } from '../../core/errors.js';
 import { expandBom } from '../../core/bom.js';
+import { stockOfWarehouse } from '../../core/warehouse.js';
 
 /** 装箱规格解析：「6台/箱」-> 6；无法解析时按 1 处理 */
 export function parsePerCarton(packingSpec?: string | null): number {
@@ -41,6 +42,7 @@ export function checkProductMaterials(
   productId: number,
   qty: number,
   cartonQty: number,
+  warehouseId?: number | null,
 ): { ok: true; requirements: Map<number, number> } | { ok: false; shortage: ProductShortage } {
   const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(productId) as any;
   if (!product) throw new BizError(404, 'PRODUCT_NOT_FOUND', '成品档案不存在');
@@ -58,7 +60,10 @@ export function checkProductMaterials(
     const m = db.prepare(`SELECT name, unit, current_stock FROM materials WHERE id = ?`).get(materialId) as
       | { name: string; unit: string; current_stock: number }
       | undefined;
-    const available = m?.current_stock ?? 0;
+    // 传了仓就按该仓存量判缺料，没传按总库存（老调用方行为不变）
+    const available = warehouseId
+      ? stockOfWarehouse('material', materialId, Number(warehouseId))
+      : Number(m?.current_stock ?? 0);
     if (available < need) {
       details.push({
         materialId,

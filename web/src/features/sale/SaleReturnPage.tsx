@@ -19,6 +19,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -37,6 +38,8 @@ export default function SaleReturnPage() {
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  /** 多仓库：退入哪个仓；不传时服务端按成品默认仓（成品库）回补 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -64,7 +67,7 @@ export default function SaleReturnPage() {
     const lines = items.filter((i) => i.productId && i.qty > 0);
     if (lines.length === 0) return message.warning('请至少录入一条退货明细');
     try {
-      await saleApi.createReturn({ orderId: orderId ?? null, returnDate, remark, items: lines });
+      await saleApi.createReturn({ orderId: orderId ?? null, returnDate, remark, warehouseId: warehouseId ?? undefined, items: lines });
       message.success('退货单已生成，成品库存已增加');
       setOpen(false);
       reload();
@@ -95,7 +98,7 @@ export default function SaleReturnPage() {
             ], res.list ?? []);
           }}>导出</Button>
           <PermGate permission="sale.return.create">
-            <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setOrderId(undefined); setReturnDate(today()); setRemark(''); setOpen(true); }}>新增退货</DockAction>
+            <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setOrderId(undefined); setReturnDate(today()); setRemark(''); setWarehouseId(null); setOpen(true); }}>新增退货</DockAction>
           </PermGate>
         </Space>
       }
@@ -201,6 +204,15 @@ export default function SaleReturnPage() {
             onChange={(v: any) => { setOrderId(v); if (v) saleApi.orderDetail(v).then((d) => setItems(d.items.map((i: any, idx: number) => ({ key: `r-${idx}`, productId: i.product_id, qty: i.qty, price: i.price })))); }}
             options={orders.map((o) => ({ value: o.id, label: `${o.order_no} · ${o.customer_name ?? '无客户'}` }))} />
           <DatePicker value={dayVal(returnDate)} onChange={(d) => setReturnDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>退货入仓</div>
+            <WarehouseSelect
+              itemType="product"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
           <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, price: 0 }])}>添加明细</Button>
         </Space>
         <ResponsiveTable size="small" rowKey="key" dataSource={items} pagination={false} scroll={{ y: 260 }} columns={[

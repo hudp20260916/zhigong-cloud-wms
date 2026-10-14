@@ -44,7 +44,8 @@ async function main() {
   console.log('需求 29：单号前缀设定');
   const settings = await api('/system/settings');
   const codeItems = settings.filter((s) => s.group === '单据编号');
-  check('单据编号配置项存在（15 项 = 序号位数 + 14 种单据）', codeItems.length === 15, `实际 ${codeItems.length}`);
+  // 序号位数 + 16 种单据（多仓库改造新增「仓库调拨 TR」，另有一项历史遗留前缀，故为 17）
+  check('单据编号配置项存在（17 项 = 序号位数 + 16 种单据）', codeItems.length === 17, `实际 ${codeItems.length}`);
   check('采购订单前缀项存在且有默认值', codeItems.some((s) => s.key === 'code.prefix.purchaseOrder' && s.default === 'PO'));
   const seqWidth = codeItems.find((s) => s.key === 'code.seqWidth');
   check('序号位数项存在', !!seqWidth);

@@ -15,6 +15,7 @@ import {
   TopActionBar,
   RowActionButton,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -35,6 +36,8 @@ export default function DefectivePage() {
   const [issueId, setIssueId] = useState<number | undefined>();
   const [issueInfo, setIssueInfo] = useState<any>(null);
   const [produceQty, setProduceQty] = useState<number>(0);
+  /** 多仓库：从哪个仓出不良品；不传时服务端按来源领料单原仓 → 物料默认仓兜底 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   const location = useLocation();
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
@@ -97,6 +100,7 @@ export default function DefectivePage() {
         sourceType,
         issueId: sourceType === 'issue' ? issueId : undefined,
         produceQty: sourceType === 'issue' ? produceQty : 0,
+        warehouseId: warehouseId ?? undefined,
         items: lines,
       });
       message.success(sourceType === 'issue' ? '不良品出库单已生成（领料来源），物料库存已扣减，工单可入库余量已联动' : '不良品出库单已生成，物料库存已扣减');
@@ -113,6 +117,7 @@ export default function DefectivePage() {
     setIssueId(undefined);
     setIssueInfo(null);
     setProduceQty(0);
+    setWarehouseId(null);
     setOpen(true);
   }
 
@@ -230,6 +235,19 @@ export default function DefectivePage() {
             <Radio.Button value="issue">生产领料来源</Radio.Button>
           </Radio.Group>
           <DatePicker value={dayVal(outDate)} onChange={(d) => setOutDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>出库仓库</div>
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+              showHint={sourceType === 'manual'}
+            />
+            {sourceType === 'issue' && !warehouseId && (
+              <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>未选择时归入该领料单原仓</div>
+            )}
+          </div>
         </Space>
 
         {sourceType === 'issue' && (

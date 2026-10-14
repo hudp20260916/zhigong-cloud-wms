@@ -55,6 +55,19 @@ export const inventoryApi = {
   // 需求 20：期初库存列表（只读，用于筛选 / 导出）
   initialList: (p?: any) => api.get<ListResult<any>>('/inventory/initial', p),
   ledger: (p?: any) => api.get<ListResult<any>>('/inventory/ledger', p),
+  // ---- 多仓库 ----
+  warehouses: (p?: any) => api.get<ListResult<any>>('/inventory/warehouses', p),
+  warehouseOptions: (itemType?: 'material' | 'product') =>
+    api.get<any[]>('/inventory/warehouses/options', itemType ? { itemType } : undefined),
+  createWarehouse: (b: any) => api.post<{ id: number }>('/inventory/warehouses', b),
+  updateWarehouse: (id: number, b: any) => api.put<{ id: number }>(`/inventory/warehouses/${id}`, b),
+  setWarehouseStatus: (id: number, status: '启用' | '停用') =>
+    api.post<{ id: number }>(`/inventory/warehouses/${id}/status`, { status }),
+  deleteWarehouse: (id: number) => api.del<{ id: number }>(`/inventory/warehouses/${id}`),
+  transfers: (p?: any) => api.get<ListResult<any>>('/inventory/transfers', p),
+  transferDetail: (id: number) => api.get<any>(`/inventory/transfers/${id}`),
+  createTransfer: (b: any) => api.post<{ id: number }>('/inventory/transfers', b),
+  undoTransfer: (id: number) => api.post<{ id: number }>(`/inventory/transfers/${id}/undo`),
 };
 
 export const purchaseApi = {

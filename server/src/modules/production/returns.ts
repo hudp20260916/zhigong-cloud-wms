@@ -5,6 +5,7 @@ import { db, nowIso, tx } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock, type LedgerEntry } from '../../core/ledger.js';
+import { resolveWarehouse } from '../../core/warehouse.js';
 import { writeLog } from '../../core/log.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
@@ -42,6 +43,8 @@ const schema = z.object({
   /** 本次退回对应的成品数量，用于核减领料产量（= 领料数量 - 实际投产数量） */
   returnQty: z.number().positive('退回成品数量必须大于 0'),
   items: z.array(itemSchema).min(1, '请至少录入一条退料明细'),
+  /** 退回到哪个仓：不传优先退回原领料单所在仓，其次按物料默认仓（物料库） */
+  warehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -257,12 +260,13 @@ materialReturnRouter.post('/', requirePerm('production.issue.create'), (req, res
     }
 
     const returnNo = nextCode('materialReturn', d.returnDate);
+    const whId = resolveWarehouse('material', d.warehouseId ?? issue.warehouse_id ?? null);
     const info = db
       .prepare(
-        `INSERT INTO material_returns (return_no, wo_id, issue_id, return_date, return_qty, status, operator_id, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO material_returns (return_no, wo_id, issue_id, return_date, return_qty, status, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
-      .run(returnNo, issue.wo_id, issue.id, d.returnDate, d.returnQty, DOC_STATUS.VALID, ctx.userId, d.remark, nowIso());
+      .run(returnNo, issue.wo_id, issue.id, d.returnDate, d.returnQty, DOC_STATUS.VALID, ctx.userId, d.remark, whId, nowIso());
     const returnId = Number(info.lastInsertRowid);
 
     const ins = db.prepare(
@@ -284,6 +288,7 @@ materialReturnRouter.post('/', requirePerm('production.issue.create'), (req, res
         bizNo: returnNo,
         unitPrice,
         operatorId: ctx.userId,
+        warehouseId: whId,
       });
     }
     applyStock(entries);

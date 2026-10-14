@@ -1,6 +1,7 @@
 import type { Direction, ItemType } from '../../../shared/enums.js';
 import { db, nowIso } from '../db/index.js';
 import { BizError } from './errors.js';
+import { addWarehouseStock, resolveWarehouse, stockOfWarehouse, warehouseName } from './warehouse.js';
 
 /**
  * 库存引擎 —— 全系统唯一允许变更库存的入口。
@@ -10,7 +11,10 @@ import { BizError } from './errors.js';
  *  2. 每次变动都会落一条原子流水，撤销 = 反向对冲，而不是删除记录；
  *  3. 汇总口径统一为 status='有效' AND is_reversal=0，
  *     因此被撤销的单据与撤销对冲行都不计入出入库净额；
- *  4. 入库类单据的 biz_no 一律留空，前端全链路看不到入库单号。
+ *  4. 入库类单据的 biz_no 一律留空，前端全链路看不到入库单号；
+ *  5. 多仓库：每条流水都绑定一个仓（warehouse_id），
+ *     数量校验与结存都按「该仓」计算，总库存由各仓相加得到。
+ *     不传 warehouseId 时按品类默认仓兜底（物料→物料库、成品→成品库），老调用方无需改动。
  */
 
 export interface LedgerEntry {
@@ -24,6 +28,11 @@ export interface LedgerEntry {
   bizNo?: string;
   unitPrice?: number;
   operatorId?: number;
+  /**
+   * 仓库 ID。不传 = 该品类的默认仓（物料→物料库、成品→成品库），
+   * 老调用方一行都不用改即可向后兼容。
+   */
+  warehouseId?: number | null;
   /** 默认禁止负库存，个别场景（盘点调整）可显式放开 */
   allowNegative?: boolean;
   isReversal?: boolean;
@@ -79,7 +88,12 @@ export function applyStock(entries: LedgerEntry[]): number[] {
     // 需求 3.7.2：盘点中锁定该对象的出入库
     if (!e.allowDuringCheck) assertNotChecking(e.itemType, e.itemId);
 
-    const before = row.current_stock;
+    // 仓库：不传就用该品类的默认仓，传了就校验存在 / 启用 / 品类匹配
+    const whId = resolveWarehouse(e.itemType, e.warehouseId);
+
+    // 数量校验与结存按「该仓」算；加权成本仍按对象总库存算（成本不随仓走）
+    const before = stockOfWarehouse(e.itemType, e.itemId, whId);
+    const totalBefore = Number(row.current_stock ?? 0);
     const avgCost = row.avg_cost ?? 0;
     const delta = e.direction === 'in' ? e.qty : -e.qty;
     const after = round(before + delta);
@@ -88,8 +102,14 @@ export function applyStock(entries: LedgerEntry[]): number[] {
       throw new BizError(
         409,
         'STOCK_SHORTAGE',
-        `库存不足：当前可用 ${round(before)}，本次需出库 ${round(e.qty)}`,
-        { itemType: e.itemType, itemId: e.itemId, available: round(before), required: e.qty },
+        `仓库「${warehouseName(whId)}」库存不足：当前可用 ${round(before)}，本次需出库 ${round(e.qty)}`,
+        {
+          itemType: e.itemType,
+          itemId: e.itemId,
+          warehouseId: whId,
+          available: round(before),
+          required: e.qty,
+        },
       );
     }
 
@@ -102,31 +122,27 @@ export function applyStock(entries: LedgerEntry[]): number[] {
       amount = round(unitPrice * e.qty);
       if (isMaterial && !e.isReversal && unitPrice > 0) {
         const newAvg =
-          before + e.qty > 0
-            ? (before * avgCost + e.qty * unitPrice) / (before + e.qty)
+          totalBefore + e.qty > 0
+            ? (totalBefore * avgCost + e.qty * unitPrice) / (totalBefore + e.qty)
             : unitPrice;
-        db.prepare(`UPDATE ${table} SET current_stock = ?, avg_cost = ? WHERE id = ?`).run(
-          after,
-          round(newAvg, 4),
-          e.itemId,
-        );
-      } else {
-        db.prepare(`UPDATE ${table} SET current_stock = ? WHERE id = ?`).run(after, e.itemId);
+        db.prepare(`UPDATE ${table} SET avg_cost = ? WHERE id = ?`).run(round(newAvg, 4), e.itemId);
       }
     } else {
       // 出库按当前加权成本计价，不改动加权成本
       if (unitPrice <= 0) unitPrice = avgCost;
       amount = round(unitPrice * e.qty);
-      db.prepare(`UPDATE ${table} SET current_stock = ? WHERE id = ?`).run(after, e.itemId);
     }
+
+    // 分仓库存与总库存一起动 —— 全系统唯一入口
+    addWarehouseStock(e.itemType, e.itemId, whId, delta);
 
     const info = db
       .prepare(
         `INSERT INTO stock_ledger
            (item_type, item_id, direction, qty, biz_type, biz_id, biz_no,
             unit_price, amount, balance_after, status, is_reversal, reversed_ledger_id,
-            operator_id, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            operator_id, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         e.itemType,
@@ -143,6 +159,7 @@ export function applyStock(entries: LedgerEntry[]): number[] {
         e.isReversal ? 1 : 0,
         e.reversedLedgerId ?? null,
         e.operatorId ?? null,
+        whId,
         nowIso(),
       );
 
@@ -176,6 +193,8 @@ export function reverseStock(bizType: string, bizId: number, operatorId?: number
     bizNo: undefined,
     unitPrice: r.unit_price,
     operatorId,
+    // 撤销必须回到原流水所在的仓，否则会把库存挪到默认仓去
+    warehouseId: r.warehouse_id ?? null,
     allowNegative: true, // 撤销是回滚，理论上不会造成负库存
     isReversal: true,
     reversedLedgerId: r.id,
@@ -203,7 +222,7 @@ export interface StockSummary {
 export function stockSummary(
   itemType: ItemType,
   itemId: number,
-  range?: { from?: string; to?: string },
+  range?: { from?: string; to?: string; warehouseId?: number | null },
 ): StockSummary {
   const where: string[] = [
     `item_type = ?`,
@@ -213,6 +232,11 @@ export function stockSummary(
   ];
   const params: any[] = [itemType, itemId];
 
+  // 传了仓库就只统计这个仓的流水（老流水 warehouse_id 已回填，不会漏）
+  if (range?.warehouseId) {
+    where.push(`IFNULL(warehouse_id, 0) = ?`);
+    params.push(Number(range.warehouseId));
+  }
   if (range?.from) {
     where.push(`created_at >= ?`);
     params.push(`${range.from}T00:00:00.000Z`);
@@ -230,12 +254,17 @@ export function stockSummary(
     return row.s;
   };
 
+  const initialWhSql = range?.warehouseId ? `AND IFNULL(warehouse_id, 0) = ?` : '';
+  const initialParams: any[] = [itemType, itemId];
+  if (range?.warehouseId) initialParams.push(Number(range.warehouseId));
+
   const initial = db
     .prepare(
       `SELECT COALESCE(SUM(qty), 0) AS s FROM stock_ledger
-        WHERE item_type = ? AND item_id = ? AND biz_type = '期初库存' AND status = '有效' AND is_reversal = 0`,
+        WHERE item_type = ? AND item_id = ? AND biz_type = '期初库存'
+          AND status = '有效' AND is_reversal = 0 ${initialWhSql}`,
     )
-    .get(itemType, itemId) as { s: number };
+    .get(...initialParams) as { s: number };
 
   const inQty = agg(`AND direction = 'in' AND biz_type <> '期初库存'`);
   const outQty = agg(`AND direction = 'out'`);

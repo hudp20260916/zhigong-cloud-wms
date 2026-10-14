@@ -160,7 +160,8 @@ async function main() {
 
   console.log('\n== P5 冒烟：打印模板 ==');
   const tpls = await call('GET', '/api/system/print/templates');
-  check('模板清单 9 类', tpls.length === 9, `${tpls.length} 类`);
+  // 10 类：采购订单 / 入库 / 退货、生产工单、领料、成品入库、销售开单 / 出库 / 退货、物料销售
+  check('模板清单 10 类', tpls.length === 10, `${tpls.length} 类`);
 
   const orders = await call('GET', '/api/purchase/orders?pageSize=5');
   const po = orders.list.find((o) => !o.parent_order_no) ?? orders.list[0];
@@ -200,7 +201,8 @@ async function main() {
 
   console.log('\n== P5 冒烟：Excel 导入 ==');
   const kinds = await call('GET', '/api/system/import/kinds');
-  check('导入类型 4 种', kinds.length === 4, kinds.map((k) => k.name).join('、'));
+  // 5 种：物料档案 / 供应商档案 / 客户档案 / 产品档案 / 期初库存
+  check('导入类型 5 种', kinds.length === 5, kinds.map((k) => k.name).join('、'));
 
   const stamp = Date.now();
   const sup = await call('POST', '/api/system/import/execute', {

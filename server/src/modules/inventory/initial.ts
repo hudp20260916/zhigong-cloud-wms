@@ -3,6 +3,7 @@ import { BIZ_TYPE } from '../../../../shared/enums.js';
 import { db } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { applyStock } from '../../core/ledger.js';
+import { addWarehouseStock, resolveWarehouse } from '../../core/warehouse.js';
 
 /**
  * 期初库存「设定」（不是累加）。
@@ -19,16 +20,18 @@ export function setInitialStock(
   qty: number,
   price: number | undefined,
   operatorId: number,
+  warehouseId?: number | null,
 ): void {
   const table = itemType === 'material' ? 'materials' : 'products';
   const label = itemType === 'material' ? '物料' : '成品';
 
-  const row = db.prepare(`SELECT current_stock FROM ${table} WHERE id = ?`).get(itemId) as
-    | { current_stock: number }
+  const exists = db.prepare(`SELECT id FROM ${table} WHERE id = ?`).get(itemId) as
+    | { id: number }
     | undefined;
-  if (!row) throw Err.notFound(`${label}档案不存在`);
+  if (!exists) throw Err.notFound(`${label}档案不存在`);
 
-  let stock = Number(row.current_stock);
+  // 期初落在哪个仓：不传按该品类默认仓（物料→物料库、成品→成品库）
+  const whId = resolveWarehouse(itemType, warehouseId ?? null);
 
   const olds = db
     .prepare(
@@ -37,16 +40,16 @@ export function setInitialStock(
     )
     .all(itemType, itemId, BIZ_TYPE.INITIAL) as any[];
 
+  // 逐条按「原流水所在仓」回滚（分仓与总库存一起退），再删掉旧期初流水
   for (const old of olds) {
     const back = old.direction === 'in' ? -Number(old.qty) : Number(old.qty);
-    stock += back;
+    addWarehouseStock(itemType, itemId, old.warehouse_id ? Number(old.warehouse_id) : whId, back);
   }
   db.prepare(`DELETE FROM stock_ledger WHERE item_type = ? AND item_id = ? AND biz_type = ?`).run(
     itemType,
     itemId,
     BIZ_TYPE.INITIAL,
   );
-  db.prepare(`UPDATE ${table} SET current_stock = ? WHERE id = ?`).run(stock, itemId);
 
   if (qty > 0) {
     applyStock([
@@ -58,6 +61,7 @@ export function setInitialStock(
         bizType: BIZ_TYPE.INITIAL,
         unitPrice: price ?? 0,
         operatorId,
+        warehouseId: whId,
         allowNegative: true,
       },
     ]);

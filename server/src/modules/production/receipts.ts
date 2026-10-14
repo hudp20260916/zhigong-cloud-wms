@@ -5,6 +5,7 @@ import { db, nowIso, tx } from '../../db/index.js';
 import { BizError, Err } from '../../core/errors.js';
 import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock, type LedgerEntry } from '../../core/ledger.js';
+import { resolveWarehouse } from '../../core/warehouse.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
 import { requirePerm } from '../../middleware/auth.js';
@@ -45,6 +46,10 @@ const schema = z.object({
   items: z.array(z.object({ productId: z.number().int().positive(), qty: z.number().positive('入库数量必须大于 0') })),
   /** 多品入库局部缺料时，前端确认跳过这些成品（需求 4.7） */
   skipProductIds: z.array(z.number().int()).optional().default([]),
+  /** 成品入到哪个仓：不传按成品默认仓（成品库） */
+  warehouseId: z.number().int().positive().nullable().optional(),
+  /** 直接扣料时从哪个仓扣物料：不传按物料默认仓（物料库） */
+  materialWarehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -138,6 +143,9 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
     const receiptNo = nextCode('productReceipt', d.receiptDate);
     let woId: number | null = d.woId ?? null;
     let issueId: number | null = d.issueId ?? null;
+    // 成品入成品仓、物料从物料仓扣：不传各自按品类默认仓兜底
+    const whProduct = resolveWarehouse('product', d.warehouseId ?? null);
+    const whMaterial = resolveWarehouse('material', d.materialWarehouseId ?? null);
 
     // ---------- 类型一：生产入库（已领料） ----------
     if (d.receiptType === '生产入库（已领料）') {
@@ -185,10 +193,10 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
 
       const info = db
         .prepare(
-          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, warehouse_id, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
         )
-        .run(receiptNo, woId, issueId, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, nowIso());
+        .run(receiptNo, woId, issueId, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, whProduct, nowIso());
       const receiptId = Number(info.lastInsertRowid);
       db.prepare(`INSERT INTO product_receipt_items (receipt_id, product_id, qty) VALUES (?,?,?)`).run(
         receiptId,
@@ -206,6 +214,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
           bizId: receiptId,
           bizNo: undefined,
           operatorId: ctx.userId,
+          warehouseId: whProduct,
         },
       ];
 
@@ -222,6 +231,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
             bizId: receiptId,
             bizNo: undefined,
             operatorId: ctx.userId,
+            warehouseId: whMaterial,
           });
         }
       }
@@ -242,10 +252,10 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
     if (d.receiptType === '售后返修入库') {
       const info = db
         .prepare(
-          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, warehouse_id, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
         )
-        .run(receiptNo, woId, null, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, nowIso());
+        .run(receiptNo, woId, null, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, whProduct, nowIso());
       const receiptId = Number(info.lastInsertRowid);
       const ins = db.prepare(`INSERT INTO product_receipt_items (receipt_id, product_id, qty) VALUES (?,?,?)`);
 
@@ -262,6 +272,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
           bizId: receiptId,
           bizNo: undefined,
           operatorId: ctx.userId,
+          warehouseId: whProduct,
         })),
       );
       writeLog({
@@ -284,10 +295,10 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
 
       const info = db
         .prepare(
-          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?)`,
+          `INSERT INTO product_receipts (receipt_no, wo_id, issue_id, receipt_date, receipt_type, status, operator_id, remark, warehouse_id, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)`,
         )
-        .run(receiptNo, woId, null, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, nowIso());
+        .run(receiptNo, woId, null, d.receiptDate, d.receiptType, DOC_STATUS.VALID, ctx.userId, d.remark, whProduct, nowIso());
       const receiptId = Number(info.lastInsertRowid);
       const ins = db.prepare(`INSERT INTO product_receipt_items (receipt_id, product_id, qty) VALUES (?,?,?)`);
 
@@ -304,6 +315,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
           bizId: receiptId,
           bizNo: undefined,
           operatorId: ctx.userId,
+          warehouseId: whProduct,
         });
       }
       applyStock(entries);
@@ -330,7 +342,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
       const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(productId) as any;
       if (!product) throw Err.notFound(`成品 #${productId} 档案不存在`);
       const cartonQty = cartonQtyOf(product, qty);
-      const result = checkProductMaterials(productId, qty, cartonQty);
+      const result = checkProductMaterials(productId, qty, cartonQty, whMaterial);
       if (!result.ok) {
         if (!skip.has(productId)) shortages.push(result.shortage);
         continue;
@@ -372,6 +384,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
       bizId: receiptId,
       bizNo: undefined,
       operatorId: ctx.userId,
+      warehouseId: whMaterial,
     }));
     for (const plan of plans) {
       entries.push({
@@ -383,6 +396,7 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
         bizId: receiptId,
         bizNo: undefined,
         operatorId: ctx.userId,
+        warehouseId: whProduct,
       });
     }
     applyStock(entries);

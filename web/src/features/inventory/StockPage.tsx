@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Input, Space, Tabs, Tag } from 'antd';
-import { EyeOutlined, ShoppingOutlined, ToolOutlined } from '@ant-design/icons';
+import { Button, Card, Input, Select, Space, Tabs, Tag, message } from 'antd';
+import { EyeOutlined, PlusOutlined, ShoppingOutlined, ToolOutlined } from '@ant-design/icons';
 import { inventoryApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -9,10 +9,13 @@ import {
   PriceText,
   TopActionBar,
   RowActionButton,
+  PermGate,
   useRowSelect,
+  clearWarehouseOptionsCache,
 } from '../../components';
 import { useAuthStore } from '../../stores/auth';
 import StockDetailModal from './StockDetailModal';
+import WarehouseModal, { type WarehouseRow } from './WarehouseModal';
 import type { ItemType } from '@shared/enums';
 
 interface StockRow {
@@ -22,6 +25,8 @@ interface StockRow {
   spec?: string;
   unit: string;
   current_stock: number;
+  /** 当前筛选仓的存量；未选仓时等于总库存 */
+  wh_qty?: number;
   safety_stock: number;
   avg_cost?: number;
   default_supplier_name?: string;
@@ -35,13 +40,54 @@ export default function StockPage() {
   const navigate = useNavigate();
   const has = useAuthStore((s) => s.has);
 
-  const { list, total, loading, params, patchParams } = useList<StockRow>(
+  // ---- 多仓库：仓库筛选 + 新增仓库 ----
+  const [whId, setWhId] = useState<number | null>(null);
+  const [whs, setWhs] = useState<any[]>([]);
+  const [whModal, setWhModal] = useState<{ open: boolean; editing: WarehouseRow | null }>({
+    open: false,
+    editing: null,
+  });
+
+  async function loadWarehouses() {
+    try {
+      const r = await inventoryApi.warehouses({ pageSize: 200 });
+      setWhs(r?.list ?? []);
+    } catch {
+      setWhs([]);
+    }
+  }
+  useEffect(() => {
+    loadWarehouses();
+  }, []);
+
+  const { list, total, loading, params, patchParams, reload } = useList<StockRow>(
     (p) => (tab === 'product' ? inventoryApi.products(p) : inventoryApi.materials(p)),
     { sortDir: 'ASC' },
   );
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
+
+  // 切换页签时仓库也要跟着换：成品只能看成品仓，物料只能看物料仓
+  useEffect(() => {
+    setWhId(null);
+    patchParams({ warehouseId: undefined, page: 1 });
+  }, [tab]);
+
+  function pickWarehouse(v: number | null) {
+    setWhId(v);
+    clearSelection();
+    patchParams({ warehouseId: v ?? undefined, page: 1 });
+  }
+
+  /** 保存后：列表 + 仓库下拉 + 筛选条件三处一起刷新 */
+  function onWarehouseSaved() {
+    clearWarehouseOptionsCache();
+    loadWarehouses();
+    setWhId(null);
+    patchParams({ warehouseId: undefined, page: 1 });
+    reload();
+  }
 
   function onTableChange(_p: any, _f: any, sorter: any) {
     const dir = sorter?.order === 'descend' ? 'DESC' : 'ASC';
@@ -74,8 +120,9 @@ export default function StockPage() {
     { title: '规格', dataIndex: 'spec', width: 160 },
     { title: '单位', dataIndex: 'unit', width: 70 },
     {
-      title: '可用库存',
-      dataIndex: 'current_stock',
+      // 多仓库：选中仓时显示该仓存量，未选仓时显示总库存
+      title: whId ? '本仓库存' : '可用库存',
+      dataIndex: whId ? 'wh_qty' : 'current_stock',
       width: 110,
       className: 'mono',
       render: (v: number, r: StockRow) => (
@@ -116,6 +163,40 @@ export default function StockPage() {
         </Space>
       }
     >
+      {/* 仓库筛选：只列当前品类能放的仓；不选中 = 看全部（总库存） */}
+      <Space wrap style={{ marginBottom: 12 }}>
+        <span style={{ color: '#595959' }}>仓库</span>
+        <Select
+          style={{ width: 200 }}
+          value={whId ?? undefined}
+          onChange={pickWarehouse}
+          allowClear
+          placeholder="全部仓库（合计）"
+          options={whs
+            .filter((w) => (tab === 'material' ? w.kind !== 'product' : w.kind !== 'material'))
+            .map((w) => ({
+              value: w.id,
+              label: `${w.name}${w.status === '停用' ? '（停用）' : ''}`,
+            }))}
+        />
+        <PermGate permission="stock.warehouse.manage">
+          <Button icon={<PlusOutlined />} onClick={() => setWhModal({ open: true, editing: null })}>
+            新增仓库
+          </Button>
+        </PermGate>
+        <PermGate permission="stock.warehouse.manage">
+          <Button
+            onClick={() => {
+              const row = whId ? whs.find((w) => w.id === whId) ?? null : null;
+              if (!row) return message.warning('请先在左侧选择一个仓库');
+              setWhModal({ open: true, editing: row });
+            }}
+          >
+            编辑仓库
+          </Button>
+        </PermGate>
+      </Space>
+
       <Tabs
         activeKey={tab}
         onChange={(k) => {
@@ -196,8 +277,16 @@ export default function StockPage() {
           itemType={detail.itemType}
           itemId={detail.itemId}
           itemName={detail.itemName}
+          warehouseId={whId}
         />
       )}
+
+      <WarehouseModal
+        open={whModal.open}
+        editing={whModal.editing}
+        onClose={() => setWhModal({ open: false, editing: null })}
+        onSaved={onWarehouseSaved}
+      />
     </Card>
   );
 }

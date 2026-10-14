@@ -13,6 +13,7 @@ import {
   TopActionBar,
   RowActionButton,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import type { ItemType } from '@shared/enums';
@@ -45,6 +46,8 @@ export default function InitialStockPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [pickId, setPickId] = useState<number | undefined>();
   const [saving, setSaving] = useState(false);
+  /** 多仓库：这批期初落在哪个仓；不传时服务端按对象品类归默认仓（物料→物料库、成品→成品库） */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   // 已录清单的主键是 item_id（不是 id），所以给 keyOf，选中态才能对上
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect(
@@ -56,6 +59,7 @@ export default function InitialStockPage() {
   useEffect(() => {
     patchParams({ page: 1 });
     clearSelection(); // 换 Tab 就是换一批数据，清空选中避免误操作到另一类对象
+    setWarehouseId(null); // 换品类可选仓跟着变，清掉避免把物料期初落到成品仓
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -120,7 +124,13 @@ export default function InitialStockPage() {
     setSaving(true);
     try {
       await inventoryApi.initial(
-        rows.map((r) => ({ itemType: r.itemType, itemId: r.itemId, qty: r.qty, price: r.price })),
+        rows.map((r) => ({
+          itemType: r.itemType,
+          itemId: r.itemId,
+          qty: r.qty,
+          price: r.price,
+          warehouseId: warehouseId ?? undefined,
+        })),
       );
       message.success(`已录入 ${rows.length} 条期初库存`);
       setRows([]);
@@ -259,6 +269,15 @@ export default function InitialStockPage() {
             options={options.map((o) => ({ value: o.id, label: `${o.code} ${o.name}` }))}
           />
           <Button onClick={addItem}>添加</Button>
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>期初仓库</div>
+            <WarehouseSelect
+              itemType={tab}
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
         </Space>
 
         <ResponsiveTable

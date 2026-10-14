@@ -29,6 +29,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -53,6 +54,8 @@ export default function PurchaseReturnPage() {
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+  /** 多仓库：从哪个仓退；不传时服务端优先退原入库单所在仓，其次物料默认仓 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -97,6 +100,7 @@ export default function PurchaseReturnPage() {
         receiptId: receiptId ?? null,
         returnDate,
         remark,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((i) => ({ materialId: i.materialId, qty: i.qty, price: i.price })),
       });
       message.success('退货单已生成，库存已扣减');
@@ -142,6 +146,7 @@ export default function PurchaseReturnPage() {
                 setItems([]);
                 setRemark('');
                 setReturnDate(today());
+                setWarehouseId(null);
                 setOpen(true);
               }}>新增退货</DockAction>
           </PermGate>
@@ -264,6 +269,19 @@ export default function PurchaseReturnPage() {
             }))}
           />
           <DatePicker value={dayVal(returnDate)} onChange={(d) => setReturnDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>退货仓库</div>
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+              showHint={!receiptId}
+            />
+            {receiptId && !warehouseId && (
+              <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>未选择时退回原入库单所在仓</div>
+            )}
+          </div>
         </Space>
 
         <ResponsiveTable

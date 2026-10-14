@@ -20,6 +20,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -45,6 +46,8 @@ export default function SaleOrderPage() {
   const [orderDate, setOrderDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  /** 多仓库：从哪个仓出货；不传时服务端按成品默认仓（成品库）校验库存 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -65,6 +68,7 @@ export default function SaleOrderPage() {
         customerId: customerId ?? null,
         orderDate,
         remark,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((i) => ({ productId: i.productId, qty: i.qty, price: i.price })),
       });
       message.success('销售单已创建，状态为待出库');
@@ -98,6 +102,7 @@ export default function SaleOrderPage() {
                 setCustomerId(undefined);
                 setOrderDate(today());
                 setRemark('');
+                setWarehouseId(null);
                 setOpen(true);
               }}>新增销售单</DockAction>
           </PermGate>
@@ -214,6 +219,15 @@ export default function SaleOrderPage() {
           <SearchableSelect style={{ width: 260 }} placeholder="客户" allowClear value={customerId} onChange={setCustomerId}
             options={customers.map((c) => ({ value: c.id, label: c.name }))} />
           <DatePicker value={dayVal(orderDate)} onChange={(d) => setOrderDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>出货仓库</div>
+            <WarehouseSelect
+              itemType="product"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
           <Button
             size="small"
             onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, price: 0 }])}

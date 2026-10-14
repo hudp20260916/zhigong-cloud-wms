@@ -35,6 +35,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -74,6 +75,10 @@ export default function ProductReceiptPage() {
   const [locked, setLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shortages, setShortages] = useState<any[] | null>(null);
+  /** 多仓库：成品入哪个仓（不传按成品默认仓──成品库） */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
+  /** 多仓库：直接扣料时从哪个仓扣物料（不传按物料默认仓──物料库） */
+  const [materialWarehouseId, setMaterialWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -102,6 +107,8 @@ export default function ProductReceiptPage() {
           setItems([{ key: 'wo', productId: d.productId, qty: d.suggestQty }]);
           setReceiptDate(today());
           setRemark('');
+          setWarehouseId(null);
+          setMaterialWarehouseId(null);
           setOpen(true);
         })
         .catch((e: any) => message.error(e.message));
@@ -118,6 +125,8 @@ export default function ProductReceiptPage() {
           setItems([{ key: 'issue', productId: d.productId, qty: d.lockQty }]);
           setReceiptDate(today());
           setRemark('');
+          setWarehouseId(null);
+          setMaterialWarehouseId(null);
           setOpen(true);
         })
         .catch((e: any) => message.error(e.message));
@@ -134,6 +143,8 @@ export default function ProductReceiptPage() {
     setItems([]);
     setReceiptDate(today());
     setRemark('');
+    setWarehouseId(null);
+    setMaterialWarehouseId(null);
     setOpen(true);
   }
 
@@ -152,6 +163,8 @@ export default function ProductReceiptPage() {
         receiptDate,
         remark,
         skipProductIds,
+        warehouseId: warehouseId ?? undefined,
+        materialWarehouseId: materialWarehouseId ?? undefined,
         items: lines.map((i) => ({ productId: i.productId, qty: i.qty })),
       });
       message.success('成品入库成功');
@@ -354,6 +367,26 @@ export default function ProductReceiptPage() {
             options={woOptions.map((o) => ({ value: o.id, label: `${o.wo_no} · ${o.product_name}` }))}
           />
           <DatePicker value={dayVal(receiptDate)} onChange={(d) => setReceiptDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>成品入仓</div>
+            <WarehouseSelect
+              itemType="product"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
+          {isDirect && (
+            <div>
+              <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>扣料仓库</div>
+              <WarehouseSelect
+                itemType="material"
+                value={materialWarehouseId}
+                onChange={setMaterialWarehouseId}
+                style={{ width: 200 }}
+              />
+            </div>
+          )}
         </Space>
 
         {locked && (

@@ -7,6 +7,8 @@ import { Err } from '../../core/errors.js';
 import { stockSummary } from '../../core/ledger.js';
 import { writeLog } from '../../core/log.js';
 import { setInitialStock } from './initial.js';
+import { warehouseRouter } from './warehouses.js';
+import { transferRouter } from './transfers.js';
 import { maskList } from '../../core/serializer.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canExport, canViewPrice } from '../../middleware/context.js';
@@ -15,31 +17,47 @@ import { ok, okList } from '../../shared/http.js';
 
 export const inventoryRouter = Router();
 
+// 多仓库改造：仓库档案与仓库调拨（放在具体路由之前，避免被 /:id 之类吃掉）
+inventoryRouter.use('/warehouses', warehouseRouter);
+inventoryRouter.use('/transfers', transferRouter);
+
 const ITEM_SQL: Record<ItemType, { table: string; label: string }> = {
   material: { table: 'materials', label: '物料' },
   product: { table: 'products', label: '成品' },
 };
 
-/** 物料/成品库存列表：支持表头全局排序，低库存标记用于「去采购 / 去创建工单」入口 */
+/**
+ * 物料/成品库存列表：支持表头全局排序，低库存标记用于「去采购 / 去创建工单」入口。
+ *
+ * 多仓库：传 warehouseId 时 wh_qty 是该仓的存量（没记录 = 0），
+ * 不传时 wh_qty 就是总库存 —— 前端一律展示 wh_qty，老前端读 current_stock 也不受影响。
+ */
 function stockList(itemType: ItemType) {
   return (req: any, res: any) => {
     const { page, pageSize, offset, keyword } = parsePage(req);
     const order = nameOrderSql('t.name', normalizeDir(req.query.sortDir));
     const { table } = ITEM_SQL[itemType];
+    const whId = Number(req.query.warehouseId ?? 0) || 0;
 
     const where = keyword
-      ? `(t.code LIKE @kw OR t.name LIKE @kw OR IFNULL(t.pinyin,'') LIKE @kw OR IFNULL(t.spec,'') LIKE @kw)`
-      : '1=1';
-    // countRows 用位置参数，另备一份 ? 版本，否则参数个数对不上
-    const wherePos = keyword
       ? `(t.code LIKE ? OR t.name LIKE ? OR IFNULL(t.pinyin,'') LIKE ? OR IFNULL(t.spec,'') LIKE ?)`
       : '1=1';
-    const params = keyword
-      ? { kw: `%${keyword}%`, limit: pageSize, offset }
-      : { limit: pageSize, offset };
+    const kwParams = keyword ? [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`] : [];
 
     const lowOnly = String(req.query.lowOnly ?? '') === '1';
     const lowCond = lowOnly ? `AND t.current_stock < t.safety_stock` : '';
+
+    // 按仓查看：SELECT 里取该仓数量，WHERE 里只要在该仓有记录的对象
+    const whSelect = whId
+      ? `, COALESCE((SELECT s.qty FROM stock_warehouse s
+                      WHERE s.item_type = ? AND s.item_id = t.id AND s.warehouse_id = ?), 0) AS wh_qty`
+      : `, t.current_stock AS wh_qty`;
+    const whSelectParams: any[] = whId ? [itemType, whId] : [];
+    const whWhere = whId
+      ? `AND EXISTS (SELECT 1 FROM stock_warehouse s
+                      WHERE s.item_type = ? AND s.item_id = t.id AND s.warehouse_id = ?)`
+      : '';
+    const whWhereParams: any[] = whId ? [itemType, whId] : [];
 
     // 只有物料有默认供应商，成品不能左连该列
     const supplierJoin =
@@ -50,19 +68,19 @@ function stockList(itemType: ItemType) {
 
     const rows = db
       .prepare(
-        `SELECT t.*${supplierCol}
+        `SELECT t.*${supplierCol}${whSelect}
            FROM ${table} t
            ${supplierJoin}
-          WHERE ${where} ${lowCond}
+          WHERE ${where} ${lowCond} ${whWhere}
           ORDER BY ${order}
-          LIMIT @limit OFFSET @offset`,
+          LIMIT ? OFFSET ?`,
       )
-      .all(params) as any[];
+      .all(...kwParams, ...whSelectParams, ...whWhereParams, pageSize, offset) as any[];
 
     const total = countRows(
       `${table} t`,
-      `${wherePos} ${lowCond}`,
-      keyword ? [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`] : [],
+      `${where} ${lowCond} ${whWhere}`,
+      [...kwParams, ...whWhereParams],
     );
 
     const ctx = { canViewPrice: canViewPrice(req.ctx!) };
@@ -89,6 +107,8 @@ inventoryRouter.get('/detail', requirePerm('stock.detail.view'), (req, res) => {
   const to = String(req.query.to ?? '').trim();
   // 需求 18/19：出入库详情按业务类型筛选
   const bizType = String(req.query.bizType ?? '').trim();
+  // 多仓库：按仓查看某个对象的流水
+  const whId = Number(req.query.warehouseId ?? 0) || 0;
 
   const cond: string[] = [`l.item_type = ?`, `l.item_id = ?`];
   const params: any[] = [itemType, itemId];
@@ -99,6 +119,10 @@ inventoryRouter.get('/detail', requirePerm('stock.detail.view'), (req, res) => {
   if (bizType) {
     cond.push(`l.biz_type = ?`);
     params.push(bizType);
+  }
+  if (whId) {
+    cond.push(`IFNULL(l.warehouse_id, 0) = ?`);
+    params.push(whId);
   }
   if (from) {
     cond.push(`l.created_at >= ?`);
@@ -111,8 +135,10 @@ inventoryRouter.get('/detail', requirePerm('stock.detail.view'), (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT l.*, u.display_name AS operator_name
-         FROM stock_ledger l LEFT JOIN users u ON u.id = l.operator_id
+      `SELECT l.*, u.display_name AS operator_name, w.name AS warehouse_name
+         FROM stock_ledger l
+         LEFT JOIN users u ON u.id = l.operator_id
+         LEFT JOIN warehouses w ON w.id = l.warehouse_id
         WHERE ${cond.join(' AND ')}
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT 500`,
@@ -120,7 +146,11 @@ inventoryRouter.get('/detail', requirePerm('stock.detail.view'), (req, res) => {
     .all(...params) as any[];
 
   const ctx = { canViewPrice: canViewPrice(req.ctx!) };
-  const summary = stockSummary(itemType, itemId, { from: from || undefined, to: to || undefined });
+  const summary = stockSummary(itemType, itemId, {
+    from: from || undefined,
+    to: to || undefined,
+    warehouseId: whId || null,
+  });
 
   ok(res, {
     summary,
@@ -139,6 +169,7 @@ inventoryRouter.get('/detail/export', requirePerm('stock.detail.view'), (req, re
   const from = String(req.query.from ?? '').trim();
   const to = String(req.query.to ?? '').trim();
   const bizType = String(req.query.bizType ?? '').trim();
+  const whId = Number(req.query.warehouseId ?? 0) || 0;
 
   const cond: string[] = [`l.item_type = ?`, `l.item_id = ?`];
   const params: any[] = [itemType, itemId];
@@ -149,6 +180,10 @@ inventoryRouter.get('/detail/export', requirePerm('stock.detail.view'), (req, re
   if (bizType) {
     cond.push(`l.biz_type = ?`);
     params.push(bizType);
+  }
+  if (whId) {
+    cond.push(`IFNULL(l.warehouse_id, 0) = ?`);
+    params.push(whId);
   }
   if (from) {
     cond.push(`l.created_at >= ?`);
@@ -161,7 +196,8 @@ inventoryRouter.get('/detail/export', requirePerm('stock.detail.view'), (req, re
 
   const rows = db
     .prepare(
-      `SELECT l.* FROM stock_ledger l
+      `SELECT l.*, w.name AS warehouse_name
+         FROM stock_ledger l LEFT JOIN warehouses w ON w.id = l.warehouse_id
         WHERE ${cond.join(' AND ')} ORDER BY l.created_at DESC, l.id DESC`,
     )
     .all(...params) as any[];
@@ -174,6 +210,8 @@ const initialSchema = z.object({
   itemId: z.number().int().positive(),
   qty: z.number().min(0, '期初数量不能为负数'),
   price: z.number().min(0).optional(),
+  /** 期初落在哪个仓：不传按该品类默认仓（物料→物料库、成品→成品库） */
+  warehouseId: z.number().int().positive().nullable().optional(),
 });
 
 const initialBatchSchema = z.object({
@@ -191,7 +229,14 @@ inventoryRouter.post('/initial', requirePerm('stock.initial.manage'), (req, res)
 
   const affected = tx(() => {
     for (const item of parsed.data.items) {
-      setInitialStock(item.itemType, item.itemId, item.qty, item.price, req.ctx!.userId);
+      setInitialStock(
+        item.itemType,
+        item.itemId,
+        item.qty,
+        item.price,
+        req.ctx!.userId,
+        req.body?.warehouseId ?? null,
+      );
     }
 
     writeLog({
@@ -263,6 +308,8 @@ inventoryRouter.get('/ledger', requirePerm('stock.view'), (req, res) => {
   const bizType = String(req.query.bizType ?? '').trim();
   // 需求 21：流水台账按方向（入库 / 出库）筛选
   const direction = String(req.query.direction ?? '').trim();
+  // 多仓库：按仓筛选流水
+  const whId = Number(req.query.warehouseId ?? 0) || 0;
 
   const cond: string[] = ['1=1'];
   const params: any[] = [];
@@ -278,14 +325,20 @@ inventoryRouter.get('/ledger', requirePerm('stock.view'), (req, res) => {
     cond.push('l.biz_type = ?');
     params.push(bizType);
   }
+  if (whId) {
+    cond.push('IFNULL(l.warehouse_id, 0) = ?');
+    params.push(whId);
+  }
 
   const rows = db
     .prepare(
-      `SELECT l.*, u.display_name AS operator_name,
+      `SELECT l.*, u.display_name AS operator_name, w.name AS warehouse_name,
               CASE WHEN l.item_type = 'material'
                    THEN (SELECT name FROM materials m WHERE m.id = l.item_id)
                    ELSE (SELECT name FROM products p WHERE p.id = l.item_id) END AS item_name
-         FROM stock_ledger l LEFT JOIN users u ON u.id = l.operator_id
+         FROM stock_ledger l
+         LEFT JOIN users u ON u.id = l.operator_id
+         LEFT JOIN warehouses w ON w.id = l.warehouse_id
         WHERE ${cond.join(' AND ')}
         ORDER BY l.created_at DESC, l.id DESC
         LIMIT ? OFFSET ?`,

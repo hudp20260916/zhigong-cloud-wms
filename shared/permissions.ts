@@ -34,6 +34,11 @@ export type Permission =
   | 'stock.view'
   | 'stock.initial.manage'
   | 'stock.detail.view'
+  | 'stock.warehouse.view'
+  | 'stock.warehouse.manage'
+  | 'stock.transfer.view'
+  | 'stock.transfer.create'
+  | 'stock.transfer.undo'
   | 'purchase.order.view'
   | 'purchase.order.create'
   | 'purchase.order.update'
@@ -90,6 +95,11 @@ const ALL: Permission[] = [
   'stock.view',
   'stock.initial.manage',
   'stock.detail.view',
+  'stock.warehouse.view',
+  'stock.warehouse.manage',
+  'stock.transfer.view',
+  'stock.transfer.create',
+  'stock.transfer.undo',
   'purchase.order.view',
   'purchase.order.create',
   'purchase.order.update',
@@ -146,6 +156,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'stock.view',
     'stock.initial.manage',
     'stock.detail.view',
+    'stock.warehouse.view',
+    'stock.transfer.view',
     'purchase.order.view',
     'purchase.receipt.view',
     'purchase.arrival.view',
@@ -163,6 +175,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'archive.partner.view',
     'stock.view',
     'stock.detail.view',
+    'stock.warehouse.view',
+    'stock.transfer.view',
     'purchase.order.view',
     'purchase.order.create',
     'purchase.order.update',
@@ -182,6 +196,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'archive.product.view',
     'stock.view',
     'stock.detail.view',
+    'stock.warehouse.view',
+    'stock.transfer.view',
     'production.wo.view',
     'production.wo.create',
     'production.wo.update',
@@ -199,6 +215,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'archive.product.view',
     'archive.partner.view',
     'stock.view',
+    'stock.warehouse.view',
+    'stock.transfer.view',
     'sale.order.view',
     'sale.order.create',
     'sale.delivery.view',
@@ -215,6 +233,11 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'archive.product.view',
     'stock.view',
     'stock.detail.view',
+    'stock.warehouse.view',
+    'stock.warehouse.manage',
+    'stock.transfer.view',
+    'stock.transfer.create',
+    'stock.transfer.undo',
     'purchase.receipt.view',
     'purchase.receipt.create',
     'purchase.receipt.undo',
@@ -239,6 +262,8 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     'archive.product.view',
     'stock.view',
     'stock.detail.view',
+    'stock.warehouse.view',
+    'stock.transfer.view',
   ],
 };
 

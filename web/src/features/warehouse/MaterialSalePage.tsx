@@ -19,6 +19,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -34,6 +35,8 @@ export default function MaterialSalePage() {
   const [saleDate, setSaleDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  /** 多仓库：从哪个仓出货，不传服务端按物料默认仓（物料库） */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   const location = useLocation();
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
@@ -59,6 +62,7 @@ export default function MaterialSalePage() {
     setCustomerId(undefined);
     setSaleDate(today());
     setRemark('');
+    setWarehouseId(null);
     setOpen(true);
   }, [location.state, materials]);
 
@@ -68,6 +72,7 @@ export default function MaterialSalePage() {
     try {
       await warehouseApi.createMaterialSale({
         customerId: customerId ?? null, saleDate, remark,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((i) => ({ materialId: i.materialId, qty: i.qty, price: i.price })),
       });
       message.success('物料销售单已生成，物料库存已扣减');
@@ -96,7 +101,7 @@ export default function MaterialSalePage() {
             ], res.list ?? []);
           }}>导出</Button>
           <PermGate permission="warehouse.materialSale.create">
-            <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setCustomerId(undefined); setSaleDate(today()); setRemark(''); setOpen(true); }}>新增物料销售</DockAction>
+            <DockAction icon={<PlusOutlined />} onClick={() => { setItems([]); setCustomerId(undefined); setSaleDate(today()); setRemark(''); setWarehouseId(null); setOpen(true); }}>新增物料销售</DockAction>
           </PermGate>
         </Space>
       }
@@ -199,6 +204,15 @@ export default function MaterialSalePage() {
           <SearchableSelect style={{ width: 260 }} placeholder="客户（可选）" allowClear value={customerId} onChange={setCustomerId}
             options={customers.map((c) => ({ value: c.id, label: c.name }))} />
           <DatePicker value={dayVal(saleDate)} onChange={(d) => setSaleDate(d ? d.format('YYYY-MM-DD') : today())} />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>出库仓库</div>
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
           <Button size="small" onClick={() => setItems((prev) => [...prev, { key: `n-${Date.now()}`, qty: 1, price: 0 }])}>添加明细</Button>
         </Space>
         <ResponsiveTable size="small" rowKey="key" dataSource={items} pagination={false} scroll={{ y: 260 }} columns={[

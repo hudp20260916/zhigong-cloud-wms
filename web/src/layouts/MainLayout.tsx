@@ -85,6 +85,7 @@ const MENU: MenuNode[] = [
     icon: <InboxOutlined />,
     children: [
       { key: '/inventory/stock', label: '库存查询', permission: 'stock.view' },
+      { key: '/inventory/transfers', label: '仓库调拨', permission: 'stock.transfer.view' },
       { key: '/inventory/initial', label: '期初库存', permission: 'stock.initial.manage' },
       { key: '/inventory/ledger', label: '流水台账', permission: 'stock.view' },
       { key: '/warehouse/alarm', label: '库存预警看板', permission: 'warehouse.alarm.view' },

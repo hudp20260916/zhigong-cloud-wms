@@ -5,6 +5,7 @@ import { db, nowIso, tx } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { nextCode } from '../../core/code.js';
 import { applyStock, reverseStock } from '../../core/ledger.js';
+import { resolveWarehouse, stockOfWarehouse, warehouseName } from '../../core/warehouse.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
 import { requirePerm } from '../../middleware/auth.js';
@@ -24,6 +25,8 @@ const orderSchema = z.object({
   customerId: z.number().int().nullable().optional(),
   orderDate: z.string().min(1, '请选择开单日期'),
   items: z.array(itemSchema).min(1, '请至少录入一条销售明细'),
+  /** 预计从哪个仓出库：不传按成品默认仓（成品库），仅用于开单时的库存校验 */
+  warehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -95,12 +98,17 @@ saleRouter.post('/orders', requirePerm('sale.order.create'), (req, res) => {
   const d = parsed.data;
 
   const id = tx(() => {
-    // 开单即校验库存，避免开出无法出库的单据
+    // 开单即校验库存，避免开出无法出库的单据。
+    // 多仓库：按出库仓校验（不传按成品默认仓），与后面真正出库时扣的是同一个仓。
+    const whId = resolveWarehouse('product', d.warehouseId ?? null);
     for (const it of d.items) {
-      const p = db.prepare(`SELECT name, current_stock FROM products WHERE id = ?`).get(it.productId) as any;
+      const p = db.prepare(`SELECT name FROM products WHERE id = ?`).get(it.productId) as any;
       if (!p) throw Err.notFound('成品档案不存在');
-      if (Number(p.current_stock) < it.qty) {
-        throw Err.conflict(`成品【${p.name}】可用库存不足：可用 ${p.current_stock}，本次需 ${it.qty}`);
+      const available = stockOfWarehouse('product', it.productId, whId);
+      if (available < it.qty) {
+        throw Err.conflict(
+          `成品【${p.name}】在「${warehouseName(whId)}」可用库存不足：可用 ${available}，本次需 ${it.qty}`,
+        );
       }
     }
 
@@ -244,6 +252,8 @@ saleRouter.post('/deliveries', requirePerm('sale.delivery.create'), (req, res) =
   const schema = z.object({
     orderId: z.number().int().positive('必须关联销售开单'),
     deliveryDate: z.string().min(1, '请选择出库日期'),
+    /** 出库仓库：不传按成品默认仓（成品库） */
+    warehouseId: z.number().int().positive().nullable().optional(),
     remark: z.string().trim().optional().default(''),
   });
   const parsed = schema.safeParse(req.body);
@@ -269,10 +279,11 @@ saleRouter.post('/deliveries', requirePerm('sale.delivery.create'), (req, res) =
       (s, i) => s + (Number(i.qty) - Number(i.delivered_qty)) * Number(i.price),
       0,
     );
+    const whId = resolveWarehouse('product', d.warehouseId ?? null);
     const info = db
       .prepare(
-        `INSERT INTO sale_deliveries (delivery_no, order_id, customer_id, delivery_date, status, total_amount, operator_id, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO sale_deliveries (delivery_no, order_id, customer_id, delivery_date, status, total_amount, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         deliveryNo,
@@ -283,6 +294,7 @@ saleRouter.post('/deliveries', requirePerm('sale.delivery.create'), (req, res) =
         totalAmount,
         req.ctx!.userId,
         d.remark,
+        whId,
         nowIso(),
       );
     const deliveryId = Number(info.lastInsertRowid);
@@ -302,6 +314,7 @@ saleRouter.post('/deliveries', requirePerm('sale.delivery.create'), (req, res) =
         bizNo: deliveryNo,
         unitPrice: it.price,
         operatorId: req.ctx!.userId,
+        warehouseId: whId,
       });
     }
     applyStock(entries);
@@ -429,6 +442,8 @@ saleRouter.post('/returns', requirePerm('sale.return.create'), (req, res) => {
     customerId: z.number().int().nullable().optional(),
     returnDate: z.string().min(1, '请选择退货日期'),
     items: z.array(itemSchema).min(1, '请至少录入一条退货明细'),
+    /** 退货入到哪个仓：不传按成品默认仓（成品库） */
+    warehouseId: z.number().int().positive().nullable().optional(),
     remark: z.string().trim().optional().default(''),
   });
   const parsed = schema.safeParse(req.body);
@@ -438,10 +453,11 @@ saleRouter.post('/returns', requirePerm('sale.return.create'), (req, res) => {
   const id = tx(() => {
     const returnNo = nextCode('saleReturn', d.returnDate);
     const totalAmount = d.items.reduce((s, i) => s + i.qty * i.price, 0);
+    const whId = resolveWarehouse('product', d.warehouseId ?? null);
     const info = db
       .prepare(
-        `INSERT INTO sale_returns (return_no, order_id, customer_id, return_date, status, total_amount, operator_id, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO sale_returns (return_no, order_id, customer_id, return_date, status, total_amount, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         returnNo,
@@ -452,6 +468,7 @@ saleRouter.post('/returns', requirePerm('sale.return.create'), (req, res) => {
         totalAmount,
         req.ctx!.userId,
         d.remark,
+        whId,
         nowIso(),
       );
     const returnId = Number(info.lastInsertRowid);
@@ -470,6 +487,7 @@ saleRouter.post('/returns', requirePerm('sale.return.create'), (req, res) => {
         bizNo: returnNo,
         unitPrice: it.price,
         operatorId: req.ctx!.userId,
+        warehouseId: whId,
       })),
     );
 

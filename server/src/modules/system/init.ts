@@ -150,11 +150,13 @@ initRouter.post('/execute', requirePerm('system.init.execute'), (req, res) => {
       deleted += Number(db.prepare(`DELETE FROM ${t}`).run().changes);
     }
 
-    // 库存清零：流水删掉后把余额字段归零，避免残留脏值
+    // 库存清零：流水删掉后把余额字段归零，避免残留脏值。
+    // 分仓库存必须一起清，否则「总库存 = 各仓之和」会出现单边残留（多仓库）。
     let cleared = 0;
     if (d.clearStock) {
       db.prepare(`UPDATE materials SET current_stock = 0, avg_cost = 0`).run();
       db.prepare(`UPDATE products SET current_stock = 0`).run();
+      db.prepare(`DELETE FROM stock_warehouse`).run();
       cleared = 1;
     } else if (d.groups.includes('archive')) {
       // 档案已清空，余额自然也不存在

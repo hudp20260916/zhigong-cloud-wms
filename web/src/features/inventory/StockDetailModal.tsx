@@ -12,13 +12,22 @@ interface Props {
   itemType: ItemType;
   itemId: number;
   itemName: string;
+  /** 多仓库：只看某个仓的流水（不传 = 全部仓） */
+  warehouseId?: number | null;
 }
 
 /**
  * 出入库详情弹窗。
  * 净额口径由服务端统一给出（撤销记录不计入），这里只负责展示与导出。
  */
-export default function StockDetailModal({ open, onClose, itemType, itemId, itemName }: Props) {
+export default function StockDetailModal({
+  open,
+  onClose,
+  itemType,
+  itemId,
+  itemName,
+  warehouseId = null,
+}: Props) {
   const [data, setData] = useState<any>(null);
   const [direction, setDirection] = useState<string>('');
   const [range, setRange] = useState<any>(null);
@@ -35,6 +44,7 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
         itemId,
         direction,
         bizType,
+        warehouseId: warehouseId ?? undefined,
         from: range?.[0]?.format('YYYY-MM-DD'),
         to: range?.[1]?.format('YYYY-MM-DD'),
       });
@@ -47,7 +57,7 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
   useEffect(() => {
     if (open) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, itemId, direction, bizType, range]);
+  }, [open, itemId, direction, bizType, range, warehouseId]);
 
   function doExport() {
     if (!canExport) {
@@ -158,6 +168,7 @@ export default function StockDetailModal({ open, onClose, itemType, itemId, item
             render: (v) => <Tag color={v === 'in' ? 'red' : 'green'}>{v === 'in' ? '入库' : '出库'}</Tag>,
           },
           { title: '数量', dataIndex: 'qty', width: 90, className: 'mono' },
+          { title: '仓库', dataIndex: 'warehouse_name', width: 100 },
           { title: '结存', dataIndex: 'balance_after', width: 90, className: 'mono' },
           ...(canViewPrice
             ? [

@@ -9,6 +9,7 @@ import MaterialPage from './features/archive/MaterialPage';
 import ProductPage from './features/archive/ProductPage';
 import PartnerPage from './features/archive/PartnerPage';
 import StockPage from './features/inventory/StockPage';
+import TransferPage from './features/inventory/TransferPage';
 import InitialStockPage from './features/inventory/InitialStockPage';
 import LedgerPage from './features/inventory/LedgerPage';
 import WorkOrderPage from './features/production/WorkOrderPage';
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="archive/suppliers" element={<PartnerPage kind="supplier" />} />
           <Route path="archive/customers" element={<PartnerPage kind="customer" />} />
           <Route path="inventory/stock" element={<StockPage />} />
+          <Route path="inventory/transfers" element={<TransferPage />} />
           <Route path="inventory/initial" element={<InitialStockPage />} />
           <Route path="inventory/ledger" element={<LedgerPage />} />
           <Route path="production/work-orders" element={<WorkOrderPage />} />

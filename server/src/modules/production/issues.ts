@@ -6,6 +6,7 @@ import { Err } from '../../core/errors.js';
 import { nextCode } from '../../core/code.js';
 import { expandBom } from '../../core/bom.js';
 import { applyStock, reverseStock } from '../../core/ledger.js';
+import { resolveWarehouse } from '../../core/warehouse.js';
 import { writeLog } from '../../core/log.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
@@ -32,6 +33,8 @@ const schema = z.object({
   items: z
     .array(z.object({ materialId: z.number().int().positive(), qty: z.number().positive() }))
     .optional(),
+  /** 领料仓库：不传按物料默认仓（物料库） */
+  warehouseId: z.number().int().positive().nullable().optional(),
   remark: z.string().trim().optional().default(''),
 });
 
@@ -225,12 +228,13 @@ issueRouter.post('/', requirePerm('production.issue.create'), (req, res) => {
     }
 
     const issueNo = nextCode('issue', d.issueDate);
+    const whId = resolveWarehouse('material', d.warehouseId ?? null);
     const info = db
       .prepare(
-        `INSERT INTO material_issues (issue_no, wo_id, issue_date, produce_qty, status, operator_id, remark, created_at)
-         VALUES (?,?,?,?,?,?,?,?)`,
+        `INSERT INTO material_issues (issue_no, wo_id, issue_date, produce_qty, status, operator_id, remark, warehouse_id, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       )
-      .run(issueNo, d.woId, d.issueDate, d.produceQty, DOC_STATUS.VALID, req.ctx!.userId, d.remark, nowIso());
+      .run(issueNo, d.woId, d.issueDate, d.produceQty, DOC_STATUS.VALID, req.ctx!.userId, d.remark, whId, nowIso());
     const issueId = Number(info.lastInsertRowid);
 
     const ins = db.prepare(
@@ -250,6 +254,7 @@ issueRouter.post('/', requirePerm('production.issue.create'), (req, res) => {
         bizNo: issueNo,
         unitPrice: m?.avg_cost ?? 0,
         operatorId: req.ctx!.userId,
+        warehouseId: whId,
       });
     }
     applyStock(entries);

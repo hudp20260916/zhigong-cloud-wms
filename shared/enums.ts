@@ -20,6 +20,8 @@ export const BIZ_TYPE = {
   PRODUCT_IN: '成品入库',
   SALE_OUT: '销售出库',
   SALE_RETURN: '销售退货',
+  TRANSFER_OUT: '调拨出库',
+  TRANSFER_IN: '调拨入库',
 } as const;
 
 export type BizType = (typeof BIZ_TYPE)[keyof typeof BIZ_TYPE];

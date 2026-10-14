@@ -41,6 +41,7 @@ import {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -83,6 +84,8 @@ export default function PurchaseReceiptPage() {
   const [ocrOpen, setOcrOpen] = useState(false);
   /** OCR 识别请求号：随建单一起提交，便于回写 ocr_logs 统计采纳率 */
   const [ocrRequestId, setOcrRequestId] = useState<string | undefined>();
+  /** 多仓库：入到哪个仓；不传时服务端按物料默认仓（物料库）兜底 */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
 
   // 需求：物料单价允许 0、价格后补——补录/修改已入库单据单价
   const [repriceOpen, setRepriceOpen] = useState(false);
@@ -153,6 +156,7 @@ export default function PurchaseReceiptPage() {
     setRemark('');
     setItems([]);
     setOcrRequestId(undefined);
+    setWarehouseId(null);
     setOpen(true);
   }
 
@@ -164,6 +168,7 @@ export default function PurchaseReceiptPage() {
     setReceiptDate(today());
     setRemark('');
     setOcrRequestId(draft.requestId);
+    setWarehouseId(null);
     setItems(
       draft.lines.map((l, idx) => ({
         key: `ocr-${idx}`,
@@ -197,6 +202,7 @@ export default function PurchaseReceiptPage() {
         remark,
         source: orderId ? 'order' : 'ocr',
         ocrRequestId,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((i) => ({
           materialId: i.materialId,
           qty: i.qty,
@@ -503,6 +509,15 @@ export default function PurchaseReceiptPage() {
             value={dayVal(receiptDate)}
             onChange={(d) => setReceiptDate(d ? d.format('YYYY-MM-DD') : today())}
           />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>入库仓库</div>
+            <WarehouseSelect
+              itemType="material"
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+            />
+          </div>
         </Space>
 
         {pendingInfo && (

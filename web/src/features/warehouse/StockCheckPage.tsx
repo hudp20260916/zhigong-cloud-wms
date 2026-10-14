@@ -15,6 +15,7 @@ import {
   TopActionBar,
   RowActionButton,
   useRowSelect,
+  WarehouseSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -30,9 +31,16 @@ export default function StockCheckPage() {
   const [remark, setRemark] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [detail, setDetail] = useState<any>(null);
+  /** 多仓库：盘哪个仓；不传时各明细按自身品类归默认仓（物料→物料库、成品→成品库） */
+  const [warehouseId, setWarehouseId] = useState<number | null>(null);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
+
+  // 盘点单只有一个仓，所以「指定仓」时必须同品类；不指定则各明细按自身品类归默认仓
+  const pickedTypes = Array.from(new Set(rows.filter((r) => r.itemId).map((r) => r.itemType)));
+  const mixedType = pickedTypes.length > 1;
+  const checkType: ItemType = pickedTypes.length === 1 ? pickedTypes[0] : 'material';
 
   useEffect(() => {
     Promise.all([archiveApi.materialOptions(), archiveApi.productOptions()])
@@ -48,10 +56,13 @@ export default function StockCheckPage() {
   async function submit() {
     const lines = rows.filter((r) => r.itemId);
     if (lines.length === 0) return message.warning('请至少录入一条实盘数据');
+    // 指定仓时全单必须同品类（物料库放不下成品，反之亦然），提前挡住并给明确提示
+    if (warehouseId && mixedType) return message.warning('指定盘点仓库时，一张盘点单只能盘同一类对象（物料或成品）');
     try {
       await warehouseApi.createCheck({
         checkDate,
         remark,
+        warehouseId: warehouseId ?? undefined,
         items: lines.map((r) => ({ itemType: r.itemType, itemId: r.itemId, actualQty: r.actualQty })),
       });
       message.success('盘点单已录入，等待管理员审核；盘点期间该对象出入库已锁定');
@@ -79,7 +90,7 @@ export default function StockCheckPage() {
             ], res.list ?? []);
           }}>导出</Button>
           <PermGate permission="warehouse.check.create">
-            <DockAction icon={<PlusOutlined />} onClick={() => { setRows([]); setCheckDate(today()); setRemark(''); setOpen(true); }}>录入实盘数据</DockAction>
+            <DockAction icon={<PlusOutlined />} onClick={() => { setRows([]); setCheckDate(today()); setRemark(''); setWarehouseId(null); setOpen(true); }}>录入实盘数据</DockAction>
           </PermGate>
         </Space>
       }
@@ -232,7 +243,28 @@ export default function StockCheckPage() {
               setRows((prev) => [...prev, { key, itemType: opt.itemType, itemId: opt.itemId, name: opt.label, bookQty: qty, actualQty: qty }]);
             }}
           />
+          <div>
+            <div style={{ marginBottom: 4, fontSize: 12, color: '#595959' }}>盘点仓库</div>
+            <WarehouseSelect
+              itemType={checkType}
+              value={warehouseId}
+              onChange={setWarehouseId}
+              style={{ width: 200 }}
+              showHint={false}
+            />
+            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
+              未选择时：物料归物料库、成品归成品库
+            </div>
+          </div>
         </Space>
+        {mixedType && warehouseId && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="一张盘点单只能盘一个仓：请拆成两张单，或清空「盘点仓库」让物料与成品各归各的默认仓"
+          />
+        )}
         <ResponsiveTable size="small" rowKey="key" dataSource={rows} pagination={false} scroll={{ y: 280 }} columns={[
           { title: '库存对象', dataIndex: 'name' },
           { title: '账面数量', dataIndex: 'bookQty', width: 110, className: 'mono' },
