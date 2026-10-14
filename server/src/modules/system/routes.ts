@@ -8,11 +8,13 @@ import { writeLog } from '../../core/log.js';
 import { requireAuth, requirePerm } from '../../middleware/auth.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
+import { nextUserNo, isBuiltinUsername } from '../../core/account.js';
 import { printRouter } from './print.js';
 import { importRouter } from './import.js';
 import { initRouter } from './init.js';
 import { settingsRouter } from './settings.js';
 import { backupRouter } from './backup.js';
+import { accountRouter } from './account.js';
 
 export const systemRouter = Router();
 
@@ -38,12 +40,13 @@ export function checkPasswordStrength(pwd: string): string | null {
 
 systemRouter.get('/users', requirePerm('system.user.manage'), (req, res) => {
   const { page, pageSize, offset, keyword } = parsePage(req);
-  const cond = keyword ? `(username LIKE ? OR display_name LIKE ?)` : '1=1';
-  const params = keyword ? [`%${keyword}%`, `%${keyword}%`] : [];
+  // 用户编号也支持搜索（新字段，NULL 时 LIKE 不成立，自动被过滤掉）
+  const cond = keyword ? `(username LIKE ? OR display_name LIKE ? OR IFNULL(user_no,'') LIKE ?)` : '1=1';
+  const params = keyword ? [`%${keyword}%`, `%${keyword}%`, `%${keyword}%`] : [];
 
   const rows = db
     .prepare(
-      `SELECT id, username, display_name, role, status, session_version, created_at
+      `SELECT id, username, display_name, role, status, session_version, user_no, created_at
          FROM users WHERE ${cond} ORDER BY id ASC LIMIT ? OFFSET ?`,
     )
     .all(...params, pageSize, offset) as any[];
@@ -65,22 +68,30 @@ systemRouter.post('/users', requirePerm('system.user.manage'), (req, res) => {
     if (db.prepare(`SELECT id FROM users WHERE username = ?`).get(d.username)) {
       throw Err.conflict(`账号【${d.username}】已存在`);
     }
+    // 内置账号受保护：既不可删除，也不允许被「另建一个同名账号」绕过配额与初始化清理
+    if (isBuiltinUsername(d.username)) {
+      throw Err.conflict(`【${d.username}】为系统内置账号，不允许重复创建`);
+    }
     const pwd = d.password ?? '12345678';
     const weak = checkPasswordStrength(pwd);
     if (weak) throw Err.badRequest(weak);
 
+    // 用户编号统一由 nextUserNo() 分配（IMMEDIATE 事务 + users.user_no 唯一索引），
+    // 避免手填或并发插入产生重号
+    const userNo = nextUserNo();
+
     const info = db
       .prepare(
-        `INSERT INTO users (username, password_hash, display_name, role, status, session_version, created_at, updated_at)
-         VALUES (?,?,?,?,?,1,?,?)`,
+        `INSERT INTO users (username, password_hash, display_name, role, status, session_version, user_no, created_at, updated_at)
+         VALUES (?,?,?,?,?,1,?,?,?)`,
       )
-      .run(d.username, bcrypt.hashSync(pwd, 10), d.displayName, d.role, d.status, nowIso(), nowIso());
+      .run(d.username, bcrypt.hashSync(pwd, 10), d.displayName, d.role, d.status, userNo, nowIso(), nowIso());
     writeLog({
       operatorId: req.ctx!.userId,
       action: '新增账号',
       targetType: 'user',
       targetId: Number(info.lastInsertRowid),
-      detail: { username: d.username, role: d.role },
+      detail: { username: d.username, role: d.role, userNo },
     });
     return Number(info.lastInsertRowid);
   });
@@ -174,3 +185,4 @@ systemRouter.use('/import', importRouter);
 systemRouter.use('/init', initRouter);
 systemRouter.use('/settings', settingsRouter);
 systemRouter.use('/backup', backupRouter);
+systemRouter.use('/account', accountRouter);

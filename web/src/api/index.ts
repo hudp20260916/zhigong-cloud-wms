@@ -235,4 +235,17 @@ export const systemApi = {
     }),
   logs: (p?: any) => api.get<ListResult<any>>('/system/logs', p),
   roles: () => api.get<{ value: string; label: string }[]>('/system/roles'),
+
+  // ---- 账号维护（高危：初始化 / 编号治理 / 备份恢复）----
+  initPreview: () => api.get<any>('/system/account/init-preview'),
+  init: (password: string, confirmText: string) =>
+    api.post<any>('/system/account/init', { password, confirmText }),
+  duplicates: () => api.get<any>('/system/account/duplicates'),
+  fixDuplicates: (password: string) =>
+    api.post<any>('/system/account/fix-duplicates', { password }),
+  backups: () => api.get<any>('/system/account/backups'),
+  createBackup: (password: string, note?: string) =>
+    api.post<any>('/system/account/backups', { password, note }),
+  restoreBackup: (id: number, password: string, confirmText: string) =>
+    api.post<any>(`/system/account/backups/${id}/restore`, { password, confirmText }),
 };

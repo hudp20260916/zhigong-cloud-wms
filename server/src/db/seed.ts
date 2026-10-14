@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { db, nowIso, tx } from './index.js';
 import { applyStock } from '../core/ledger.js';
 import { pinyinInitials } from '../core/pinyin.js';
+import { BUILTIN_USERS, nextUserNo } from '../core/account.js';
 import type { Role } from '../../../shared/permissions.js';
 
 const DEFAULT_PASSWORD = 'admin12345';
@@ -92,15 +93,15 @@ const PRODUCTS = [
   },
 ];
 
-const USERS: { username: string; name: string; role: Role }[] = [
-  { username: 'admin', name: '系统管理员', role: 'admin' },
-  { username: 'purchaser', name: '采购员小李', role: 'purchaser' },
-  { username: 'warehouse', name: '库管老王', role: 'warehouse' },
-  { username: 'finance', name: '财务小张', role: 'finance' },
-  { username: 'producer', name: '生产员小赵', role: 'producer' },
-  { username: 'sales', name: '销售员小孙', role: 'sales' },
-  { username: 'viewer', name: '查询员小陈', role: 'viewer' },
-];
+/**
+ * 内置账号名单不再在这里手写 —— 单一来源是 core/account.ts 的 BUILTIN_USERS，
+ * 保证「账号初始化保留的名单」和「首次启动写入的名单」永远一致。
+ */
+const USERS: { username: string; name: string; role: Role }[] = BUILTIN_USERS.map((u) => ({
+  username: u.username,
+  name: u.name,
+  role: u.role,
+}));
 
 const CUSTOMERS = [
   { code: 'C101', name: '广州家宜商贸有限公司', contact: '林经理', phone: '13900000001' },
@@ -117,10 +118,13 @@ export function seedIfEmpty(): void {
     const hash = bcrypt.hashSync(DEFAULT_PASSWORD, 10);
 
     const insUser = db.prepare(
-      `INSERT INTO users (username, password_hash, display_name, role, status, session_version, created_at, updated_at)
-       VALUES (?,?,?,?, 'active', 1, ?,?)`,
+      `INSERT INTO users (username, password_hash, display_name, role, status, session_version, user_no, created_at, updated_at)
+       VALUES (?,?,?,?, 'active', 1, ?,?,?)`,
     );
-    for (const u of USERS) insUser.run(u.username, hash, u.name, u.role, now, now);
+    // 内置账号占掉编号序列的前 7 位（U0001–U0007），空的库从 1 开始取号
+    for (const u of USERS) {
+      insUser.run(u.username, hash, u.name, u.role, nextUserNo(), now, now);
+    }
 
     const insSupplier = db.prepare(
       `INSERT INTO suppliers (code, name, contact, phone, created_at) VALUES (?,?,?,?,?)`,

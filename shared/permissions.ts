@@ -78,6 +78,8 @@ export type Permission =
   | 'report.view'
   | 'system.view'
   | 'system.user.manage'
+  | 'system.user.init'
+  | 'system.backup.manage'
   | 'system.init.execute'
   | 'system.print.manage'
   | 'system.import.execute'
@@ -139,6 +141,8 @@ const ALL: Permission[] = [
   'report.view',
   'system.view',
   'system.user.manage',
+  'system.user.init',
+  'system.backup.manage',
   'system.init.execute',
   'system.print.manage',
   'system.import.execute',

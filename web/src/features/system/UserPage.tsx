@@ -11,11 +11,14 @@ import {
   Typography,
   message,
 } from 'antd';
-import { EditOutlined, LockOutlined, PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, LockOutlined, NumberOutlined, PlusOutlined, SafetyOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Button } from 'antd';
 import { systemApi } from '../../api';
+import { AccountInitModal, BackupModal, DuplicateNoModal } from './AccountMaintenanceModals';
 import { useList } from '../../hooks/useList';
 import {
   PermPage,
+  PermGate,
   ResponsiveTable,
   DockAction,
   Modal,
@@ -52,6 +55,10 @@ export default function UserPage() {
   const [pwdTarget, setPwdTarget] = useState<any>(null);
   const [pwdForm] = Form.useForm();
   const [newPwd, setNewPwd] = useState('');
+  /** 高危维护弹窗：账号初始化 / 编号重号修复 / 备份恢复 */
+  const [initOpen, setInitOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
   /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
@@ -150,9 +157,25 @@ export default function UserPage() {
       <Card
         title="用户管理"
         extra={
-          <Space>
+          <Space wrap>
+            {/* 高危维护入口：没有对应权限点的话按钮直接不渲染 */}
+            <PermGate permission="system.backup.manage">
+              <Button icon={<SafetyOutlined />} onClick={() => setBackupOpen(true)}>
+                备份与恢复
+              </Button>
+            </PermGate>
+            <PermGate permission="system.user.init">
+              <Button icon={<NumberOutlined />} onClick={() => setDupOpen(true)}>
+                编号重号检测
+              </Button>
+            </PermGate>
+            <PermGate permission="system.user.init">
+              <Button danger icon={<ThunderboltOutlined />} onClick={() => setInitOpen(true)}>
+                账号初始化
+              </Button>
+            </PermGate>
             <Input.Search
-              placeholder="账号 / 姓名"
+              placeholder="账号 / 姓名 / 编号"
               allowClear
               style={{ width: 220 }}
               onSearch={(keyword) => patchParams({ keyword })}
@@ -209,6 +232,7 @@ export default function UserPage() {
             onChange: (page, pageSize) => patchParams({ page, pageSize }),
           }}
           columns={[
+            { title: '用户编号', dataIndex: 'user_no', width: 110, className: 'mono' },
             { title: '账号', dataIndex: 'username', width: 140 },
             { title: '姓名', dataIndex: 'display_name', width: 140 },
             {
@@ -303,6 +327,11 @@ export default function UserPage() {
           保存后旧密码立即失效；若该账号当前在线，将被强制踢出并要求重新登录。
         </div>
       </Modal>
+
+      {/* 高危维护：三个弹窗统一的成功回调是「刷新列表」，初始化/恢复之后账号会有增删 */}
+      <AccountInitModal open={initOpen} onClose={() => setInitOpen(false)} onDone={reload} />
+      <DuplicateNoModal open={dupOpen} onClose={() => setDupOpen(false)} onDone={reload} />
+      <BackupModal open={backupOpen} onClose={() => setBackupOpen(false)} onDone={reload} />
     </PermPage>
   );
 }
