@@ -7,6 +7,7 @@ import { writeLog } from '../../core/log.js';
 import { requireAuth, signToken } from '../../middleware/auth.js';
 import { permissionsOf } from '../../../../shared/permissions.js';
 import { ok } from '../../shared/http.js';
+import { companyName } from '../system/settings.js';
 
 export const authRouter = Router();
 
@@ -42,6 +43,15 @@ authRouter.post('/login', (req, res) => {
     },
     permissions: permissionsOf(user.role),
   });
+});
+
+/**
+ * 免登录读取公司名称（authRouter 挂载在 requireAuth 之前）。
+ * 登录页、浏览器标题在用户登录前就要展示品牌名，所以走公开接口。
+ * companyName() 内部已做「为空回退默认」兜底。
+ */
+authRouter.get('/brand', (_req, res) => {
+  ok(res, { companyName: companyName() });
 });
 
 authRouter.get('/me', requireAuth, (req, res) => {

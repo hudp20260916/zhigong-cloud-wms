@@ -3,13 +3,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Alert, Button, Card, Form, Input, Typography, message } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/auth';
-import { BRAND_NAME, BRAND_SUBTITLE } from '../../brand';
+import { BRAND_SUBTITLE, useBrandName } from '../../brand';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
+  const brandName = useBrandName();
 
   async function onFinish(values: { username: string; password: string }) {
     setLoading(true);
@@ -35,7 +36,7 @@ export default function LoginPage() {
     >
       <Card style={{ width: 380 }} styles={{ body: { padding: 28 } }}>
         <Typography.Title level={4} style={{ marginBottom: 4 }}>
-          {BRAND_NAME}
+          {brandName}
         </Typography.Title>
         <Typography.Text type="secondary">{BRAND_SUBTITLE}</Typography.Text>
 

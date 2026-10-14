@@ -8,10 +8,8 @@ import './styles/responsive.css';
 import './styles/theme.css';
 import './utils/keyboard';
 import App from './App';
-import { BRAND_FULL_TITLE } from './brand';
+import './brand'; // 品牌名：模块导入时即按缓存值刷标题，并异步拉取服务端最新公司名称
 import { useThemeStore, type ThemeMode } from './stores/theme';
-
-document.title = BRAND_FULL_TITLE;
 
 /** 高亮色：单一蓝/青，全站共用，避免撞色 */
 const HIGHLIGHT = '#22d3ee'; // 青

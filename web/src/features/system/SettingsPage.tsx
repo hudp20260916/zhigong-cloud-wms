@@ -17,6 +17,7 @@ import { CloudDownloadOutlined, DatabaseOutlined, FileExcelOutlined } from '@ant
 import * as XLSX from 'xlsx';
 import { api } from '../../api/client';
 import { backupApi } from '../../api';
+import { refreshBrandName } from '../../brand';
 import { PermPage, PermGate } from '../../components';
 
 interface SettingItem {
@@ -82,7 +83,9 @@ function SettingsInner() {
       await api.put('/system/settings', {
         items: changed.map((i) => ({ key: i.key, value: draft[i.key] })),
       });
-      message.success('已保存，预警看板与新单号立即生效');
+      // 公司名称改动立即同步到浏览器标题 / 登录页 / 侧边栏（brandStore 全局订阅）
+      await refreshBrandName();
+      message.success('已保存，预警看板、单号规则与品牌名立即生效');
       load();
     } catch (e: any) {
       message.error(e.message);
@@ -177,6 +180,15 @@ function SettingsInner() {
                     />
                   )}
                   <div style={{ marginTop: 6, color: '#888', fontSize: 12 }}>{s.hint}</div>
+                  {/* 公司名称：实时预览保存后的全站生效值（留空回退默认） */}
+                  {s.key === 'company.name' && (
+                    <div style={{ marginTop: 4, fontSize: 12 }}>
+                      保存后全站生效：
+                      <Typography.Text strong>
+                        {(draft[s.key] ?? '').trim() || '啊平智能（默认）'}
+                      </Typography.Text>
+                    </div>
+                  )}
                   {/* 需求 29：实时预览该类型下一张单号 */}
                   {s.preview && (
                     <div style={{ marginTop: 4, fontSize: 12 }}>

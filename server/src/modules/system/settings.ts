@@ -79,7 +79,8 @@ export const SETTING_DEFS: SettingDef[] = [
     label: '公司名称',
     group: '企业信息',
     type: 'text',
-    hint: '用于打印模板抬头。',
+    default: '啊平智能',
+    hint: '用于打印模板抬头、浏览器标题、登录页与侧边栏品牌名。留空回退默认「啊平智能」，最长 50 字。',
   },
   {
     key: 'company.phone',
@@ -129,6 +130,18 @@ function valueOf(key: string): string {
   return row?.value ?? '';
 }
 
+/** 公司名称的统一读取口：未配置 / 空白时回退默认值「啊平智能」 */
+export function companyName(): string {
+  return valueOf('company.name').trim() || '啊平智能';
+}
+
+/** 公司名称输入校验：允许留空（回退默认），填了则最长 50 字 */
+export function validateCompanyName(raw: string): string | null {
+  const v = String(raw ?? '').trim();
+  if (v.length > 50) return '「公司名称」最长 50 个字';
+  return null;
+}
+
 /** 预警阈值读取：告警看板与报表共用 */
 export function alertConfig() {
   return {
@@ -176,6 +189,11 @@ settingsRouter.put('/', requirePerm('system.init.execute'), (req, res) => {
       if (v && !/^[A-Za-z0-9_-]+$/.test(v)) {
         throw Err.badRequest(`「${def.label}」只能包含字母、数字、- 和 _`);
       }
+    }
+    // 公司名称校验：留空回退默认，填了最长 50 字
+    if (def.key === 'company.name') {
+      const bad = validateCompanyName(it.value);
+      if (bad) throw Err.badRequest(bad);
     }
   }
 

@@ -4,6 +4,7 @@ import { db, nowIso } from '../../db/index.js';
 import { Err } from '../../core/errors.js';
 import { writeLog } from '../../core/log.js';
 import { renderTemplate } from '../../core/template.js';
+import { companyName } from './settings.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { canViewPrice } from '../../middleware/context.js';
 import { ok } from '../../shared/http.js';
@@ -394,7 +395,7 @@ function setting(key: string): string {
 
 function companyInfo() {
   return {
-    companyName: setting('company.name') || '啊平智能',
+    companyName: companyName(),
     companyPhone: setting('company.phone'),
     companyAddress: setting('company.address'),
   };

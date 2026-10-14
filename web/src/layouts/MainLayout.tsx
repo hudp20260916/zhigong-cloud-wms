@@ -17,7 +17,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import { ROLE_LABEL, type Role } from '@shared/permissions';
-import { BRAND_NAME } from '../brand';
+import { useBrandName } from '../brand';
 import { useAuthStore } from '../stores/auth';
 import { useThemeStore } from '../stores/theme';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -123,6 +123,7 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
+  const brandName = useBrandName();
   const logout = useAuthStore((s) => s.logout);
   const has = useAuthStore((s) => s.has);
 
@@ -203,7 +204,7 @@ export default function MainLayout() {
         >
           <div className="app-logo">
             <FileTextOutlined />
-            {BRAND_NAME}
+            {brandName}
           </div>
           {menu}
         </Sider>
@@ -218,7 +219,7 @@ export default function MainLayout() {
           styles={{ body: { padding: 0 } }}
           title={
             <span>
-              <FileTextOutlined /> {BRAND_NAME}
+              <FileTextOutlined /> {brandName}
             </span>
           }
         >
