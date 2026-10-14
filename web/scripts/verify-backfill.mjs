@@ -160,6 +160,14 @@ const woDetail = {
   plan_end: '2026-10-20',
   remark: '工单备注',
 };
+
+// —— 复刻 utils/date.ts 的 dayVal：把后端字符串日期转成 antd DatePicker 需要的 Dayjs ——
+const dayjs = (await import('dayjs')).default;
+const dayVal = (v) => {
+  if (!v) return undefined;
+  const d = dayjs(v);
+  return d.isValid() ? d : undefined;
+};
 const woRow = { id: 55, wo_no: 'WO20260055' };
 
 function MirrorWorkOrder() {
@@ -177,8 +185,9 @@ function MirrorWorkOrder() {
         productId: detail.product_id,
         planQty: detail.plan_qty,
         bomVersion: detail.bom_version,
-        planStart: detail.plan_start || undefined,
-        planEnd: detail.plan_end || undefined,
+        // ⚠️ 必须转成 dayjs：DatePicker 拿到字符串会调 value.format() 抛错 → 弹窗白屏
+        planStart: dayVal(detail.plan_start),
+        planEnd: dayVal(detail.plan_end),
         remark: detail.remark,
       });
       setOpen(true);
@@ -224,7 +233,17 @@ assert(calls.length === beforeWo + 1, '工单：一次打开只回填一次（�
 assert(woCall && woCall.productId === 12, '工单：主产品回填');
 assert(woCall && woCall.planQty === 300, '工单：计划产量回填 300');
 assert(woCall && woCall.bomVersion === 'V2.0', '工单：BOM 版本回填');
-assert(woCall && woCall.planStart === '2026-10-01' && woCall.planEnd === '2026-10-20', '工单：计划起止回填');
+assert(
+  woCall?.planStart?.format('YYYY-MM-DD') === '2026-10-01' &&
+    woCall?.planEnd?.format('YYYY-MM-DD') === '2026-10-20',
+  '工单：计划起止回填',
+);
+// 白屏根因回归：回填给 DatePicker 的必须是 dayjs 对象，字符串会在渲染期 value.format() 抛错
+assert(
+  woCall && typeof woCall.planStart?.format === 'function' && typeof woCall.planEnd?.format === 'function',
+  '工单：日期回填为 dayjs 对象（DatePicker 需要，传字符串会白屏）',
+);
+assert(typeof '2026-10-01'.format !== 'function', '反例：字符串确实没有 format，旧写法必崩（白屏根因）');
 assert(woCall && woCall.remark === '工单备注', '工单：备注回填');
 
 // 关闭再打开另一条：不能残留上一条的数据

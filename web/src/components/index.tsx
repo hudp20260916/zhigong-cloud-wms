@@ -9,6 +9,7 @@ import { CopyableCode } from './CopyableCode';
 import { DetailTable } from './DetailTable';
 import { FilterBar } from './FilterBar';
 import { SearchableSelect } from './SearchableSelect';
+import { ErrorBoundary } from './ErrorBoundary';
 
 export {
   PrintButton,
@@ -19,6 +20,7 @@ export {
   DetailTable,
   FilterBar,
   SearchableSelect,
+  ErrorBoundary,
 };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */

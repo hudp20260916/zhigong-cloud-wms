@@ -21,6 +21,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
+import { useAuthStore } from '../../stores/auth';
 import { useList } from '../../hooks/useList';
 import {
   PermGate,
@@ -30,6 +31,7 @@ import {
   DockAction,
   CopyableCode,
   FilterBar,
+  ErrorBoundary,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -40,6 +42,8 @@ export default function WorkOrderPage() {
   );
   const navigate = useNavigate();
   const location = useLocation();
+  /** 权限判断：用于在点按钮前给出「无权限」提示，而不是点了没反应或后端 403 弹错 */
+  const hasPerm = useAuthStore((s) => s.has);
   const [products, setProducts] = useState<any[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
@@ -53,6 +57,12 @@ export default function WorkOrderPage() {
   const [pendingDetail, setPendingDetail] = useState<any>(null);
   /** 详情加载中：期间禁用表单，避免对尚未回填的空表单误操作 */
   const [detailLoading, setDetailLoading] = useState(false);
+  /**
+   * 编辑态的「计划数量下限」约束：{ issued, received, min }。
+   * 已领部分 / 已入部分都允许编辑，但改后的计划量不能低于已发生的量，
+   * 否则会出现「领了 100、入了 100，计划却写成 50」的账实倒挂。
+   */
+  const [editFloor, setEditFloor] = useState<{ issued: number; received: number; min: number } | null>(null);
   const [form] = Form.useForm();
 
   // 选中行从当前列表实时取：翻页/刷新后旧的 selectedId 天然失效，
@@ -95,12 +105,17 @@ export default function WorkOrderPage() {
     try {
       const detail = await productionApi.workOrderDetail(row.id);
       setEditing(row);
+      const issued = Number(detail.issued_qty ?? 0);
+      const received = Number(detail.received_qty ?? 0);
+      setEditFloor({ issued, received, min: Math.max(issued, received) });
       setPendingDetail({
         productId: detail.product_id,
         planQty: detail.plan_qty,
         bomVersion: detail.bom_version,
-        planStart: detail.plan_start || undefined,
-        planEnd: detail.plan_end || undefined,
+        // ⚠️ 必须是 dayjs 对象：DatePicker 拿到字符串会调 value.format() 直接抛错，
+        // 整个弹窗渲染中断 → 平哥看到的「点编辑白屏」就是这个（utils/date.ts 注释里已记录过同类事故）
+        planStart: dayVal(detail.plan_start),
+        planEnd: dayVal(detail.plan_end),
         remark: detail.remark,
       });
       setOpen(true);
@@ -130,6 +145,7 @@ export default function WorkOrderPage() {
     setEditing(null);
     setPendingDetail(null);
     setDetailLoading(false);
+    setEditFloor(null);
     form.resetFields();
   }
 
@@ -139,21 +155,32 @@ export default function WorkOrderPage() {
   /**
    * 状态联动校验：返回 null 表示允许执行，否则返回提示文案并阻止执行。
    *
-   * 口径与后端 workOrders.ts 的 canEdit / canReceive 保持一致：
-   * - 已完工（status = '已完工'） → 阻止一切写操作
+   * 口径与后端 workOrders.ts 的 canEdit / canReceive / delete 校验保持一致：
+   * - 无 production.wo.update 权限 → 阻止「编辑」「删除」，提示无权限（而不是点了没反应）
+   * - 编辑**不看状态**：部分领料、部分入库、已完工都允许改计划量。
+   *   （已完工不能拦，否则「计划量改到等于已入库量」会立刻判完工并被永久锁死，无法追加生产。）
+   *   真正的门槛是「计划量不得低于 max(已领料, 已入库)」，由表单校验 + 后端 PUT 双重兜底。
    * - 入库已满（remainQty <= 0）  → 阻止「去入库」「去领料」（料已够、无需再领/再入）
-   * - 已领料（issued_qty > 0）    → 阻止「编辑」「删除」（后端 canEdit 亦要求 issued_qty = 0）
+   * - 已发生领料或入库            → 阻止「删除」（后端 delete 硬性要求两者都为 0）
+   * - 已完工                      → 阻止除编辑外的写操作（已入满，无需再领/再入，也不许删）
    * - 已领部分已全部入库          → 阻止「去入库」：去入库按「实际已领数量」入库且未领部分不再处理，
    *                                 已领部分若已入满则本单无可再入数量（需先继续领料）
    * 打印是只读操作，不设状态门槛。
    */
   function blockReason(row: any, action: WoAction): string | null {
     if (action === 'print') return null;
+    if ((action === 'edit' || action === 'delete') && !hasPerm('production.wo.update'))
+      return '无编辑 / 删除权限';
+    // 编辑只看权限与（后端兜底的）计划量下限，不看工单状态
+    if (action === 'edit') return null;
     if (row.status === '已完工') return '已完工';
     const remain = Number(row.remainQty ?? 0);
     if ((action === 'receive' || action === 'issue') && remain <= 0) return '已入库完成';
-    if ((action === 'edit' || action === 'delete') && Number(row.issued_qty ?? 0) > 0)
-      return '已领料完成';
+    if (
+      action === 'delete' &&
+      (Number(row.issued_qty ?? 0) > 0 || Number(row.received_qty ?? 0) > 0)
+    )
+      return '已发生领料或入库，禁止删除';
     if (action === 'receive') {
       const issued = Number(row.issued_qty ?? 0);
       const received = Number(row.received_qty ?? 0);
@@ -180,8 +207,17 @@ export default function WorkOrderPage() {
   }
 
   async function submit() {
-    const v = await form.validateFields();
     try {
+      const v = await form.validateFields();
+      // 计划数量下限：不得低于「已领料数量」与「已入库数量」的较大者。
+      // 字段级 validator 已拦一道，这里再拦一道并给出全局提示，防止 rules 未覆盖的时序漏过；
+      // 后端 PUT 还有第三道，三处口径完全一致。
+      if (editFloor && editFloor.min > 0 && Number(v.planQty) < editFloor.min - 1e-9) {
+        message.error(
+          `计划数量不得低于 ${editFloor.min}（已领料 ${editFloor.issued}，已入库 ${editFloor.received}）`,
+        );
+        return;
+      }
       const payload = {
         ...v,
         planStart: v.planStart ? v.planStart.format('YYYY-MM-DD') : '',
@@ -198,6 +234,8 @@ export default function WorkOrderPage() {
       setSelectedId(null); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
+      // validateFields 失败时 e 是 { errorFields }，字段级红字已经提示过了，不再弹全局报错
+      if (e?.errorFields) return;
       message.error(e.message);
     }
   }
@@ -423,6 +461,9 @@ export default function WorkOrderPage() {
         forceRender
         confirmLoading={detailLoading}
       >
+        {/* 渲染兜底：表单里有 Select / DatePicker / InputNumber，一旦回填值类型不对
+            （如日期传了字符串）会在渲染期抛错并让整页白屏。包一层后只这块降级成错误提示。 */}
+        <ErrorBoundary label="工单表单">
         <Form form={form} layout="vertical" preserve={false} disabled={detailLoading}>
           <Form.Item name="productId" label="主产品" rules={[{ required: true, message: '请选择主产品' }]}>
             <Select
@@ -431,7 +472,32 @@ export default function WorkOrderPage() {
               options={products.map((p) => ({ value: p.id, label: `${p.code} ${p.name}` }))}
             />
           </Form.Item>
-          <Form.Item name="planQty" label="计划产量" rules={[{ required: true }]}>
+          <Form.Item
+            name="planQty"
+            label="计划产量"
+            extra={
+              editFloor && editFloor.min > 0
+                ? `本单已领料 ${editFloor.issued}、已入库 ${editFloor.received}，计划数量不得低于 ${editFloor.min}`
+                : undefined
+            }
+            rules={[
+              { required: true, message: '请输入计划产量' },
+              {
+                // 编辑已发生领料 / 入库的工单时，计划量不得小于已发生的量（后端同样校验）
+                validator: (_r, value) => {
+                  if (!editFloor || editFloor.min <= 0) return Promise.resolve();
+                  if (value == null || Number(value) < editFloor.min - 1e-9) {
+                    return Promise.reject(
+                      new Error(
+                        `计划数量不得低于 ${editFloor.min}（已领料 ${editFloor.issued}，已入库 ${editFloor.received}）`,
+                      ),
+                    );
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="bomVersion" label="BOM 版本">
@@ -449,6 +515,7 @@ export default function WorkOrderPage() {
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
+        </ErrorBoundary>
       </Modal>
     </Card>
   );

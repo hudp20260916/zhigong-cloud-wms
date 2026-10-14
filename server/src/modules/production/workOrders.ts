@@ -87,10 +87,9 @@ workOrderRouter.get('/', requirePerm('production.wo.view'), (req, res) => {
       ...r,
       remainQty: remain,
       canReceive: canReceive && remain > 0,
-      canEdit:
-        ctx.permissions.includes('production.wo.update') &&
-        Number(r.issued_qty) === 0 &&
-        r.status !== '已完工',
+      // 已领部分 / 已入部分 / 已完工都允许编辑（改计划量），真正的门槛是
+      // PUT 接口的「计划量不得低于已领料、已入库数量」下限校验。
+      canEdit: ctx.permissions.includes('production.wo.update'),
     };
   });
 
@@ -224,7 +223,23 @@ workOrderRouter.put('/:id', requirePerm('production.wo.update'), (req, res) => {
   tx(() => {
     const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(id) as any;
     if (!wo) throw Err.notFound('生产工单不存在');
-    if (Number(wo.issued_qty) > 0) throw Err.conflict('该工单已领料，禁止修改');
+    // 不因「已完工」拒绝编辑：把计划量改到等于已入库量时工单会立刻判完工，
+    // 若此时再禁止编辑，就再也调不大、无法追加生产，等于把单据锁死。
+    // 真正要守住的是下面的计划量下限，改大改小都受它约束。
+
+    // 计划数量下限：不得小于「已领料数量」和「已入库数量」中的较大者。
+    // 否则会出现「领了 100 / 入了 100，计划却写成 50」这种账实倒挂，
+    // 后续损耗计算（issued − received）与可领上限（plan − issued）都会变成负数。
+    const issued = Number(wo.issued_qty) || 0;
+    const received = Number(wo.received_qty) || 0;
+    const floor = Math.max(issued, received);
+    if (Number(d.planQty) < floor - 1e-9) {
+      throw Err.conflict(
+        `计划数量不得低于 ${floor}（已领料 ${issued}，已入库 ${received}）`,
+        { floor, issuedQty: issued, receivedQty: received },
+      );
+    }
+
     db.prepare(
       `UPDATE work_orders SET product_id=?, plan_qty=?, bom_version=?, plan_start=?, plan_end=?, remark=?, updated_at=?
         WHERE id=?`,
