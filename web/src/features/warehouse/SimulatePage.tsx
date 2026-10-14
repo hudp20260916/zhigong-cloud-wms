@@ -47,10 +47,29 @@ export default function SimulatePage() {
     }
   }
 
+  /**
+   * 「按缺料去采购」。
+   *
+   * 只有一件成品需要排产时，直接把「主产品 + 待生产量」带进采购订单页，
+   * 由它自动展开多级 BOM 并按缺料数量回填采购数量，用户不用再选品。
+   * 多件成品时无法归属到单一主产品，退回原来的「按缺料物料直采」。
+   */
   function toPurchase() {
     const gaps = (result?.materials ?? []).filter((m: any) => m.gapQty > 0);
     if (gaps.length === 0) return message.info('当前没有缺料，无需采购');
+    const need = (result?.products ?? []).filter((p: any) => p.needProduce > 0);
+    if (need.length === 1) {
+      goBomPurchase(need[0]);
+      return;
+    }
     navigate('/purchase/orders', { state: { prefill: { materialIds: gaps.map((m: any) => m.materialId) } } });
+  }
+
+  /** 带主产品 + 计划产量跳采购订单页（BOM 采购模式，自动展开并计算缺料） */
+  function goBomPurchase(p: any) {
+    navigate('/purchase/orders', {
+      state: { prefill: { productId: p.productId, planQty: p.needProduce } },
+    });
   }
 
   return (
@@ -122,23 +141,31 @@ export default function SimulatePage() {
                 render: (v) => <span style={{ color: Number(v) > 0 ? '#cf1322' : undefined }}>{v}</span> },
               {
                 title: '结论',
-                width: 150,
-                // 需求 23：点击「需排产」直接跳转工单页，并带出该成品与建议排产量
+                width: 230,
                 render: (_v, r: any) =>
                   r.needProduce > 0 ? (
-                    <PermGate permission="production.wo.create">
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={() =>
-                          navigate('/production/work-orders', {
-                            state: { prefill: { productId: r.productId, planQty: r.needProduce } },
-                          })
-                        }
-                      >
-                        需排产 {r.needProduce}
-                      </Button>
-                    </PermGate>
+                    <Space size={0}>
+                      {/* 需求 23：点击「需排产」直接跳转工单页，并带出该成品与建议排产量 */}
+                      <PermGate permission="production.wo.create">
+                        <Button
+                          type="link"
+                          size="small"
+                          onClick={() =>
+                            navigate('/production/work-orders', {
+                              state: { prefill: { productId: r.productId, planQty: r.needProduce } },
+                            })
+                          }
+                        >
+                          需排产 {r.needProduce}
+                        </Button>
+                      </PermGate>
+                      {/* 按该成品的缺料直接采购：自动带出主产品与待生产量 */}
+                      <PermGate permission="purchase.order.create">
+                        <Button type="link" size="small" onClick={() => goBomPurchase(r)}>
+                          按缺料采购
+                        </Button>
+                      </PermGate>
+                    </Space>
                   ) : (
                     <Tag color="green">库存充足</Tag>
                   ),

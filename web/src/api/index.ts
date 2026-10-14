@@ -64,6 +64,13 @@ export const purchaseApi = {
   createOrder: (b: any) => api.post<any>('/purchase/orders', b),
   updateOrder: (id: number, b: any) => api.put<{ id: number }>(`/purchase/orders/${id}`, b),
   deleteOrder: (id: number) => api.del<{ id: number }>(`/purchase/orders/${id}`),
+  /**
+   * 「按主产品 BOM 采购」的物料需求测算（只读）。
+   * 服务端做多级 BOM 展开与已占用量计算，前端只负责展示与回填，
+   * 避免「前端按单层 BOM 算、服务端按多级扣料」两套口径对不上账。
+   */
+  bomPreview: (p: { productId: number; planQty?: number }) =>
+    api.get<any>('/purchase/orders/bom-preview', p),
 
   receipts: (p?: any) => api.get<ListResult<any>>('/purchase/receipts', p),
   receiptDetail: (id: number) => api.get<any>(`/purchase/receipts/${id}`),

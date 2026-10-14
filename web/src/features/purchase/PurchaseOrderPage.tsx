@@ -64,6 +64,13 @@ interface OrderRow {
   isParent: boolean;
 }
 
+/**
+ * 采购明细行。
+ *
+ * BOM 模式下除物料本身，还带「单位用量 / 需求量 / 已占用 / 可用库存 / 缺料数量」，
+ * 全部由服务端 `GET /purchase/orders/bom-preview` 算好，前端只展示与回填，
+ * 保证与生产领料扣料的口径一致（都是多级 BOM 展开后的结果）。
+ */
 interface ItemRow {
   key: string;
   materialId?: number;
@@ -71,10 +78,26 @@ interface ItemRow {
   name?: string;
   spec?: string;
   unit?: string;
+  /** 采购数量 */
   qty: number;
   price: number;
+  /** 现有库存 */
   stock?: number;
-  need?: number;
+  /** 单件成品耗用量（多级展开汇总） */
+  qtyPerUnit?: number;
+  /** 需求量 = 单位用量 × 计划产量 */
+  requireQty?: number;
+  /** 已占用量：未完工工单未领料部分的需求 */
+  occupiedQty?: number;
+  /** 可用库存 = max(0, 现有库存 − 已占用量) */
+  availableQty?: number;
+  /** 缺料数量 = max(0, 需求量 − 可用库存) */
+  shortageQty?: number;
+  /** 建议采购数量 = 缺料数量按单位取整后的值（点「计算」时回填到 qty） */
+  purchaseQty?: number;
+  /** 采购在途（仅展示，不参与计算） */
+  inTransitQty?: number;
+  isCarton?: boolean;
 }
 
 export default function PurchaseOrderPage() {
@@ -97,7 +120,19 @@ export default function PurchaseOrderPage() {
   const [productId, setProductId] = useState<number | undefined>();
   const [planQty, setPlanQty] = useState<number>(100);
   const [bomVersion, setBomVersion] = useState<string>('');
-  const [bomSource, setBomSource] = useState<any[]>([]);
+  /**
+   * 是否已点过「计算」。
+   * 未计算 → 采购数量 = 计划产量（先选品、后填产量时的占位值）；
+   * 已计算 → 采购数量 = 服务端算出的缺料数量（取整后）。
+   */
+  const [calculated, setCalculated] = useState(false);
+  /** 服务端测算结果（含 BOM 版本、缺料数量等） */
+  const [preview, setPreview] = useState<any>(null);
+  const [bomLoading, setBomLoading] = useState(false);
+  /** 从排产页「按缺料采购」跳进来时置 true：拿到测算结果后自动按缺料回填一次 */
+  const [autoCalc, setAutoCalc] = useState(false);
+  /** 手动刷新计数器：BOM 在别处被改过后，用它强制重新拉一次测算 */
+  const [bomNonce, setBomNonce] = useState(0);
   const [header, setHeader] = useState<{ orderDate: string; expectedDate: string; remark: string }>({
     orderDate: today(),
     expectedDate: '',
@@ -113,6 +148,29 @@ export default function PurchaseOrderPage() {
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
     archiveApi.supplierOptions().then(setSuppliers).catch(() => undefined);
   }, []);
+
+  /**
+   * 从模拟出货排产页「按缺料采购」跳过来：直接带出主产品 + 计划产量，
+   * 切到 BOM 模式并自动按缺料数量回填，用户不用再选品、也不用再点「计算」。
+   */
+  useEffect(() => {
+    const st: any = location.state;
+    if (st?.prefill?.productId) {
+      setEditing(null);
+      setMode('bom');
+      setProductId(Number(st.prefill.productId));
+      setPlanQty(Number(st.prefill.planQty ?? 0) || 0);
+      setCalculated(false);
+      setPreview(null);
+      setAutoCalc(true);
+      setItems([]);
+      setBomVersion('');
+      setHeader({ orderDate: today(), expectedDate: '', remark: '' });
+      setOpen(true);
+      navigate('/purchase/orders', { replace: true, state: null });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   // 从库存页「去采购」跳转过来时自动带出物料
   useEffect(() => {
@@ -165,36 +223,123 @@ export default function PurchaseOrderPage() {
     ]);
   }
 
-  /** 按主产品 BOM 展开：勾选所需子物料，数量按计划产量换算 */
-  async function expandBom() {
+  /**
+   * 选好主产品 / 改了计划产量 → 自动向服务端要一次「物料需求测算」，
+   * 明细行直接铺出来，不需要再点「展开 BOM」。
+   *
+   * 计算为什么放服务端：需求量要走多级 BOM 展开 + 虚拟件穿透 + 已占用量汇总，
+   * 前端自己按单层 BOM 算会和领料扣料的口径对不上，出现「提示充足、一投产就缺料」。
+   *
+   * 300ms 防抖：计划产量是 InputNumber，边输边请求会把接口打满。
+   */
+  useEffect(() => {
+    if (mode !== 'bom' || !open || !productId) {
+      if (mode !== 'bom') setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setBomLoading(true);
+    const timer = setTimeout(() => {
+      purchaseApi
+        .bomPreview({ productId: productId as number, planQty })
+        .then((res) => {
+          if (cancelled) return;
+          setPreview(res);
+          setBomVersion(res.bomVersion ?? '');
+          const plan = Number(res.planQty ?? planQty) || 0;
+          const rows = (res.items ?? []).map((it: any) => ({
+            key: `bom-${it.materialId}`,
+            materialId: it.materialId,
+            code: it.materialCode,
+            name: it.materialName,
+            spec: it.spec,
+            unit: it.unit,
+            // 未点「计算」→ 采购数量 = 计划产量；已点 → 采购数量 = 缺料数量
+            qty: calculated ? Number(it.purchaseQty ?? 0) : plan,
+            price: Number(it.price ?? 0),
+            stock: it.stock,
+            qtyPerUnit: it.qtyPerUnit,
+            requireQty: it.requireQty,
+            occupiedQty: it.occupiedQty,
+            availableQty: it.availableQty,
+            shortageQty: it.shortageQty,
+            purchaseQty: it.purchaseQty,
+            inTransitQty: it.inTransitQty,
+            isCarton: !!it.isCarton,
+          }));
+          setItems((prev) => {
+            // 编辑已保存的订单：只把测算列（需求量 / 缺料数量 …）贴回原行，
+            // 采购数量保持单据原值，不能被测算结果顶掉。
+            if (editing) {
+              const byId = new Map<string, ItemRow>(rows.map((r: ItemRow) => [String(r.materialId), r]));
+              return prev.map((x) => {
+                const hit = byId.get(String(x.materialId));
+                if (!hit) return x;
+                return { ...x, ...hit, key: x.key, qty: x.qty, price: x.price };
+              });
+            }
+            return rows;
+          });
+          // 排产页带参数跳进来时，直接把缺料数量回填成采购数量，用户不用再点一次「计算」
+          if (autoCalc) {
+            setCalculated(true);
+            setAutoCalc(false);
+            setItems((prev) =>
+              prev.map((x) => ({ ...x, qty: Number(x.purchaseQty ?? x.shortageQty ?? 0) })),
+            );
+            const n = (res.items ?? []).filter((i: any) => Number(i.shortageQty) > 0).length;
+            message.success(
+              n > 0
+                ? `已带出主产品与计划产量，并按缺料数量回填 ${n} 行采购数量`
+                : '已带出主产品与计划产量，当前库存充足、采购数量为 0',
+            );
+          }
+          if (res.bomMissing && !res.bomError) {
+            message.warning('该主产品尚未配置 BOM 清单，请先在成品档案里维护');
+          }
+        })
+        .catch((e: any) => {
+          if (!cancelled) message.error(e?.message ?? '物料需求测算失败');
+        })
+        .finally(() => {
+          if (!cancelled) setBomLoading(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // calculated 变化也要重算一次：点「计算」后采购数量要从「计划产量」切到「缺料数量」
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, open, productId, planQty, calculated, autoCalc, bomNonce, editing]);
+
+  /** 点击「计算」：把各行采购数量回填为缺料数量（库存充足的行为 0） */
+  function applyCalculated() {
     if (!productId) {
       message.warning('请先选择主产品');
       return;
     }
-    try {
-      const detail = await archiveApi.productDetail(productId);
-      setBomVersion(detail.bom_version ?? 'V1.0');
-      setBomSource(detail.bom ?? []);
-      const rows: ItemRow[] = (detail.bom ?? []).map((b: any, i: number) => {
-        const m = materials.find((x) => x.id === b.materialId);
-        return {
-          key: `bom-${i}`,
-          materialId: b.materialId,
-          code: b.materialCode,
-          name: b.materialName,
-          spec: b.spec,
-          unit: b.unit,
-          qty: Number(b.qtyPerUnit) * (planQty || 0),
-          price: Number(m?.avg_cost ?? 0),
-          stock: m?.current_stock ?? 0,
-          need: Number(b.qtyPerUnit) * (planQty || 0),
-        };
-      });
-      setItems(rows);
-      message.success(`已展开 BOM，共 ${rows.length} 项物料`);
-    } catch (e: any) {
-      message.error(e.message);
+    setCalculated(true);
+    // 已有测算结果时立刻回填，不等下一次请求往返
+    if (preview?.items) {
+      setItems((prev) =>
+        prev.map((x) => ({ ...x, qty: Number(x.purchaseQty ?? x.shortageQty ?? 0) })),
+      );
+      const n = (preview.items ?? []).filter((i: any) => Number(i.shortageQty) > 0).length;
+      message.success(
+        n > 0 ? `已按缺料数量回填 ${n} 行采购数量，其余行库存充足、采购数量为 0` : '当前库存充足，各行采购数量均为 0',
+      );
     }
+  }
+
+  /** BOM 在别处被改动后手动刷新一次（选品 / 改产量会自动重算，这个只是兜底入口） */
+  function refreshBom() {
+    if (!productId) {
+      message.warning('请先选择主产品');
+      return;
+    }
+    setBomNonce((n) => n + 1);
+    message.info('已重新展开 BOM');
   }
 
   async function openEdit(row: OrderRow) {
@@ -232,10 +377,12 @@ export default function PurchaseOrderPage() {
     setEditing(null);
     setMode('direct');
     setItems([]);
-    setBomSource([]);
     setProductId(undefined);
     setPlanQty(100);
     setBomVersion('');
+    setCalculated(false);
+    setPreview(null);
+    setAutoCalc(false);
     setHeader({ orderDate: today(), expectedDate: '', remark: '' });
     setOpen(true);
   }
@@ -513,7 +660,10 @@ export default function PurchaseOrderPage() {
           onChange={(e) => {
             setMode(e.target.value);
             setItems([]);
-            setBomSource([]);
+            // 换采购模式：清空测算状态，避免把 BOM 模式的缺料数量带进直接采购
+            setCalculated(false);
+            setPreview(null);
+            setAutoCalc(false);
           }}
           disabled={!!editing}
         >
@@ -522,26 +672,64 @@ export default function PurchaseOrderPage() {
         </Radio.Group>
 
         {mode === 'bom' && (
-          <Space style={{ marginTop: 12 }} wrap>
-            <Select
-              showSearch
-              style={{ width: 320 }}
-              placeholder="按名称 / 编码 / 拼音首字母检索主产品"
-              value={productId}
-              onChange={setProductId}
-              filterOption={(input, option) => {
-                const p = products.find((x) => x.id === option?.value);
-                if (!p) return false;
-                const kw = input.toLowerCase();
-                return [p.name, p.code, p.pinyin, p.spec].filter(Boolean).join(' ').toLowerCase().includes(kw);
-              }}
-              notFoundContent="未找到匹配主产品"
-              options={products.map((p) => ({ value: p.id, label: `${p.code} ${p.name}` }))}
-            />
-            <InputNumber min={1} value={planQty} onChange={(v) => setPlanQty(Number(v ?? 0))} addonBefore="计划产量" />
-            <Button onClick={expandBom}>展开 BOM</Button>
-            {bomVersion && <Tag color="blue">BOM {bomVersion}</Tag>}
-          </Space>
+          <>
+            <Space style={{ marginTop: 12 }} wrap>
+              <Select
+                showSearch
+                style={{ width: 320 }}
+                placeholder="按名称 / 编码 / 拼音首字母检索主产品"
+                value={productId}
+                onChange={(v) => {
+                  setProductId(v);
+                  // 换主产品 = 重新展开，采购数量回到「未计算」状态
+                  setCalculated(false);
+                }}
+                filterOption={(input, option) => {
+                  const p = products.find((x) => x.id === option?.value);
+                  if (!p) return false;
+                  const kw = input.toLowerCase();
+                  return [p.name, p.code, p.pinyin, p.spec].filter(Boolean).join(' ').toLowerCase().includes(kw);
+                }}
+                notFoundContent="未找到匹配主产品"
+                options={products.map((p) => ({ value: p.id, label: `${p.code} ${p.name}` }))}
+              />
+              <InputNumber
+                min={0}
+                value={planQty}
+                // 允许清空：计划产量为空 / 0 时只展开 BOM 结构，需求量全部为 0
+                onChange={(v) => setPlanQty(Number(v ?? 0))}
+                addonBefore="计划产量"
+              />
+              <Button type="primary" loading={bomLoading} onClick={applyCalculated}>
+                计算
+              </Button>
+              <Button onClick={refreshBom}>重新展开</Button>
+              {bomVersion ? <Tag color="blue">BOM {bomVersion}</Tag> : null}
+              {preview?.deepExpanded ? <Tag color="purple">已展开多级 BOM</Tag> : null}
+            </Space>
+            <div style={{ marginTop: 8 }}>
+              {bomLoading ? (
+                <Typography.Text type="secondary">正在展开 BOM 并测算物料需求…</Typography.Text>
+              ) : preview?.bomError ? (
+                <Alert type="error" showIcon message={`BOM 展开失败：${preview.bomError}`} />
+              ) : preview?.bomMissing ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="该主产品尚未配置 BOM 清单，请先在成品档案里维护后再计算"
+                />
+              ) : calculated ? (
+                <Typography.Text type="secondary">
+                  已按缺料数量回填采购数量（需求量 = 计划产量 × 单位用量，缺料 = 需求量 − 可用库存，
+                  库存充足的行为 0）
+                </Typography.Text>
+              ) : (
+                <Typography.Text type="secondary">
+                  BOM 已自动展开；采购数量暂按计划产量占位，点「计算」后按缺料数量回填
+                </Typography.Text>
+              )}
+            </div>
+          </>
         )}
 
         {mode === 'direct' && (
@@ -566,7 +754,7 @@ export default function PurchaseOrderPage() {
           rowKey="key"
           dataSource={items}
           pagination={false}
-          scroll={{ y: 280 }}
+          scroll={{ y: 280, x: mode === 'bom' ? 1700 : 1100 }}
           locale={{ emptyText: <Empty description="尚未添加采购明细" /> }}
           columns={[
             {
@@ -604,6 +792,60 @@ export default function PurchaseOrderPage() {
             },
             { title: '规格', dataIndex: 'spec', width: 140 },
             { title: '单位', dataIndex: 'unit', width: 70 },
+            // 以下测算列只在「按主产品 BOM 采购」时出现，全部由服务端 bom-preview 算好
+            ...(mode === 'bom'
+              ? [
+                  {
+                    title: '单位用量',
+                    dataIndex: 'qtyPerUnit',
+                    width: 90,
+                    className: 'mono',
+                    render: (v: any, r: ItemRow) =>
+                      r.isCarton ? (
+                        <Tooltip title="外箱耗材：按装箱规格折算，非线性用量">
+                          <span>{v ?? '-'}*</span>
+                        </Tooltip>
+                      ) : (
+                        (v ?? '-')
+                      ),
+                  },
+                  { title: '需求量', dataIndex: 'requireQty', width: 90, className: 'mono' },
+                  {
+                    title: '已占用',
+                    dataIndex: 'occupiedQty',
+                    width: 90,
+                    className: 'mono',
+                    render: (v: any) => (
+                      <Tooltip title="未完工工单未领料部分对该物料的需求量">
+                        <span>{v ?? '-'}</span>
+                      </Tooltip>
+                    ),
+                  },
+                  { title: '可用库存', dataIndex: 'availableQty', width: 90, className: 'mono' },
+                  {
+                    title: '缺料数量',
+                    dataIndex: 'shortageQty',
+                    width: 100,
+                    className: 'mono',
+                    render: (v: any, r: ItemRow) => {
+                      const n = Number(v ?? 0);
+                      if (n <= 0) return <Tag color="green">充足</Tag>;
+                      return <span style={{ color: '#cf1322', fontWeight: 600 }}>{n}</span>;
+                    },
+                  },
+                  {
+                    title: '采购在途',
+                    dataIndex: 'inTransitQty',
+                    width: 90,
+                    className: 'mono',
+                    render: (v: any) => (
+                      <Tooltip title="已下单未到货数量，仅作参考，不参与缺料计算">
+                        <span>{v ?? '-'}</span>
+                      </Tooltip>
+                    ),
+                  },
+                ]
+              : []),
             { title: '当前库存', dataIndex: 'stock', width: 90, className: 'mono' },
             {
               title: '采购数量',

@@ -7,6 +7,7 @@ import { nextCode } from '../../core/code.js';
 import { writeLog } from '../../core/log.js';
 import { maskList } from '../../core/serializer.js';
 import { requirePerm } from '../../middleware/auth.js';
+import { purchaseBomPreviewRouter } from './bomPreview.js';
 import { canViewPrice } from '../../middleware/context.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
@@ -47,6 +48,12 @@ const createSchema = z.object({
   expectedDate: z.string().optional().nullable().default(''),
   remark: z.string().trim().optional().nullable().default(''),
 });
+
+/**
+ * 「按主产品 BOM 采购」的物料需求测算（只读）。
+ * ⚠️ 必须声明在 /:id 之前，否则会被当成订单 id 匹配掉。
+ */
+purchaseOrderRouter.use('/bom-preview', purchaseBomPreviewRouter);
 
 /** 列表：附带采购摘要、是否可去入库（需求 4.1 状态与权限联动） */
 purchaseOrderRouter.get('/', requirePerm('purchase.order.view'), (req, res) => {

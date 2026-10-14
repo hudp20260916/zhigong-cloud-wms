@@ -73,7 +73,9 @@ assert(midB['发热组件'].current_stock === 0, '虚拟件本身不占库存、
 
 const woB1 = (await call('GET', '/production/work-orders?pageSize=50', null, token)).list.find((w) => w.id === woB.id);
 assert(woB1.issued_qty === 30, '工单累计领料合计 = 30');
-assert(woB1.canReceive === false, '已领料工单在生产工单列表隐藏「去入库」（防重复扣料）');
+// 口径（2026-10-14 定）：去入库按 remain = 已领 − 已入 判定，不是「有没有领过料」。
+// 本工单计划 30 / 已领 30 / 已入 0 → remain = 30 > 0，所以仍要显示「去入库」。
+assert(woB1.canReceive === true, '已领料未入库的工单仍显示「去入库」（remain = 已领 − 已入 > 0）');
 
 const issues = (await call('GET', '/production/issues?pageSize=50', null, token)).list.filter((i) => i.wo_id === woB.id);
 assert(issues.length === 1 && issues[0].canReceive === true, '领料列表显示「去入库」入口');
