@@ -91,6 +91,9 @@ export const productionApi = {
   workOrderOptions: () => api.get<any[]>('/production/work-orders/options'),
   workOrderDetail: (id: number) => api.get<any>(`/production/work-orders/${id}`),
   forReceiptByWo: (id: number) => api.get<any>(`/production/work-orders/${id}/for-receipt`),
+  /** 新建 / 复制工单时的物料需求预览（只读展示，不参与校验拦截） */
+  bomPreview: (productId: number, planQty: number) =>
+    api.get<any>(`/production/work-orders/bom-preview`, { productId, planQty }),
   createWorkOrder: (b: any) => api.post<{ id: number }>('/production/work-orders', b),
   updateWorkOrder: (id: number, b: any) => api.put<{ id: number }>(`/production/work-orders/${id}`, b),
   deleteWorkOrder: (id: number) => api.del<{ id: number }>(`/production/work-orders/${id}`),

@@ -96,41 +96,40 @@ async function main() {
   assert('错误提示同时给出已领料 / 已入库数量',
     msg(bad).includes('已领料 100') && msg(bad).includes('已入库 100'), msg(bad));
 
-  const ok99 = await call('PUT', `/production/work-orders/${wo.id}`, {
-    productId, planQty: 100, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
-  });
-  assert('改成 100（= 下限）→ 允许', ok99.status === 200, ok99.body);
-
+  // 先调大再回到下限：改成下限 100 会让「已入 100 = 计划 100」直接变已完工，
+  // 之后的编辑会被「已完工禁止修改」拦截，所以调大的用例必须放在前面。
   const ok300 = await call('PUT', `/production/work-orders/${wo.id}`, {
     productId, planQty: 300, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
   assert('改成 300（调大）→ 允许', ok300.status === 200, ok300.body);
 
+  const ok99 = await call('PUT', `/production/work-orders/${wo.id}`, {
+    productId, planQty: 100, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
+  });
+  assert('改成 100（= 下限）→ 允许', ok99.status === 200, ok99.body);
+
   // ---------- 规则 4：已完工禁止编辑；已发生业务禁止删除 ----------
-  console.log('\n[规则 4] 已完工仍可编辑（受下限约束）/ 已发生业务禁止删除');
+  console.log('\n[规则 4] 已完工禁止编辑 / 已发生业务禁止删除');
   await call('PUT', `/production/work-orders/${wo.id}`, {
     productId, planQty: 100, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
   const done = D(await call('GET', `/production/work-orders/${wo.id}`));
   assert('已入库量 = 计划量 → 状态变为「已完工」', done.status === '已完工', done);
 
-  // 已完工若禁止编辑，会出现「计划量改到等于已入库量 → 立刻完工 → 永久锁死」的死结，
-  // 因此这里放开：改大允许（追加生产），改小仍受下限约束
   const editDown = await call('PUT', `/production/work-orders/${wo.id}`, {
     productId, planQty: 99, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
-  assert('已完工工单改小到 99（低于已入 100）→ 仍被下限拒绝', editDown.status === 409, editDown.body);
+  assert('已完工工单改小到 99 → 被拒（409）', editDown.status === 409, editDown.body);
 
   const editUp = await call('PUT', `/production/work-orders/${wo.id}`, {
     productId, planQty: 150, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
-  assert('已完工工单调大到 150 → 允许（可追加生产）', editUp.status === 200, editUp.body);
-  const revived = D(await call('GET', `/production/work-orders/${wo.id}`));
-  assert('调大后状态回退为「生产中」', revived.status === '生产中', revived);
+  assert('已完工工单调大到 150 → 被拒（409）', editUp.status === 409, editUp.body);
+  assert('提示为「已完工，禁止修改」', msg(editUp).includes('已完工'), msg(editUp));
 
   const list2 = await call('GET', `/production/work-orders?keyword=${encodeURIComponent(done.wo_no)}`);
   const row2 = (list2.body?.data?.list ?? []).find((r) => r.id === wo.id);
-  assert('列表 canEdit = true（已完工也允许编辑）', row2?.canEdit === true, row2);
+  assert('列表 canEdit = false（已完工不可编辑）', row2?.canEdit === false, row2);
 
   const del = await call('DELETE', `/production/work-orders/${wo.id}`);
   assert('已发生领料/入库的工单 → 删除被拒（409）', del.status === 409, del.body);
@@ -143,13 +142,21 @@ async function main() {
   })).id;
   assert('创建第二个成品用于换产品测试', !!productId2);
 
-  const swap = await call('PUT', `/production/work-orders/${wo.id}`, {
-    productId: productId2, planQty: 150, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
+  // 用一条「已领料但未完工」的工单测试，避免被「已完工禁止修改」抢先拦截
+  const wo5 = D(await call('POST', '/production/work-orders', {
+    productId, planQty: 200, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke-swap',
+  }));
+  await call('POST', '/production/issues', { woId: wo5.id, issueDate: today, produceQty: 50, remark: 'smoke' });
+  const wo5Before = D(await call('GET', `/production/work-orders/${wo5.id}`));
+  assert('构造已领料未完工工单（issued=50）', Number(wo5Before.issued_qty) === 50, wo5Before);
+
+  const swap = await call('PUT', `/production/work-orders/${wo5.id}`, {
+    productId: productId2, planQty: 200, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
-  assert('已领料且已入库的工单换主产品 → 409 拒绝', swap.status === 409, swap.body);
+  assert('已领料的工单换主产品 → 409 拒绝', swap.status === 409, swap.body);
   assert('提示明确说明不允许更换主产品', msg(swap).includes('不允许更换主产品'), msg(swap));
 
-  const keepSame = await call('PUT', `/production/work-orders/${wo.id}`, {
+  const keepSame = await call('PUT', `/production/work-orders/${wo5.id}`, {
     productId, planQty: 160, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke',
   });
   assert('不换产品、只改计划量 → 仍允许（不影响其它编辑）', keepSame.status === 200, keepSame.body);
@@ -174,6 +181,78 @@ async function main() {
   assert('主产品已换成第二个成品', Number(swapped.product_id) === productId2, swapped);
   const del2 = await call('DELETE', `/production/work-orders/${fresh.id}`);
   assert('未发生业务的工单可删除', del2.status === 200, del2.body);
+
+  // ---------- BOM 需求预估（仅展示，不校验不拦截） ----------
+  console.log('\n[BOM 预估] 选主产品 + 计划量 → 按 BOM 用量算需求并比对库存');
+  const noProduct = await call('GET', '/production/work-orders/bom-preview?planQty=10');
+  assert('未选主产品 → 400 且提示先选主产品',
+    noProduct.status === 400 && msg(noProduct).includes('请先选择主产品'), noProduct.body);
+
+  const zeroQty = D(await call('GET', `/production/work-orders/bom-preview?productId=${productId}&planQty=0`));
+  assert('计划量为空/0 → 返回空明细且不报错',
+    Array.isArray(zeroQty.items) && zeroQty.items.length === 0 && zeroQty.shortageCount === 0, zeroQty);
+
+  const pvOk = D(await call('GET', `/production/work-orders/bom-preview?productId=${productId}&planQty=10`));
+  const lineOk = (pvOk.items ?? []).find((i) => Number(i.materialId) === materialId);
+  assert('返回 BOM 物料明细（含编码/名称/单位）',
+    (pvOk.items ?? []).length >= 1 && !!lineOk?.materialCode, pvOk);
+  assert('需求数量 = 计划量 × BOM 用量（10 × 1 = 10）', Number(lineOk?.requireQty) === 10, lineOk);
+  assert('库存满足 → enough = true，整体 shortageCount = 0',
+    (pvOk.items ?? []).every((i) => i.enough === true) && pvOk.shortageCount === 0, pvOk);
+
+  const pvBad = D(await call('GET', `/production/work-orders/bom-preview?productId=${productId}&planQty=200000`));
+  assert('需求大于库存 → enough = false', (pvBad.items ?? []).every((i) => i.enough === false), pvBad);
+  assert('缺料项数 shortageCount 与明细一致',
+    Number(pvBad.shortageCount) === (pvBad.items ?? []).filter((i) => !i.enough).length, pvBad);
+  assert('缺料数量 = 需求 − 库存',
+    (pvBad.items ?? []).every((i) => Math.abs(i.shortage - (i.requireQty - i.stock)) < 1e-6), pvBad);
+
+  const shortWo = await call('POST', '/production/work-orders', {
+    productId, planQty: 200000, bomVersion: 'V1.0', planStart: today, planEnd: '', remark: 'smoke-shortage',
+  });
+  assert('缺料状态仍可正常建单（只读提示，不拦截）', shortWo.status === 200, shortWo.body);
+
+  // ---------- 复制工单 ----------
+  console.log('\n[复制工单] 以原单为模板建新单');
+  const src = D(await call('POST', '/production/work-orders', {
+    productId, planQty: 120, bomVersion: 'V1.0', planStart: today, planEnd: today, remark: 'smoke-src',
+  }));
+  const srcDetail = D(await call('GET', `/production/work-orders/${src.id}`));
+  assert('原单就绪（计划 120）', Number(srcDetail.plan_qty) === 120, srcDetail);
+
+  const copied = await call('POST', '/production/work-orders', {
+    productId: srcDetail.product_id,
+    planQty: srcDetail.plan_qty,
+    bomVersion: srcDetail.bom_version,
+    planStart: today,   // 开工日期默认当天
+    planEnd: '',        // 完工日期留空
+    remark: srcDetail.remark,
+  });
+  const cp = D(copied);
+  assert('复制建单成功（接口仅返回新单 id，单号由系统生成）', copied.status === 200 && !!cp.id, copied.body);
+
+  const cpDetail = D(await call('GET', `/production/work-orders/${cp.id}`));
+  assert('单号由系统自动生成且与原单不同',
+    !!cpDetail.wo_no && cpDetail.wo_no !== srcDetail.wo_no && /^WO/i.test(cpDetail.wo_no), cpDetail);
+  assert('复制单主产品 = 原单主产品', Number(cpDetail.product_id) === Number(srcDetail.product_id), cpDetail);
+  assert('复制单计划量 = 原单计划量（120）', Number(cpDetail.plan_qty) === 120, cpDetail);
+  assert('复制单 BOM 版本 = 原单', cpDetail.bom_version === srcDetail.bom_version, cpDetail);
+  assert('复制单备注 = 原单备注', cpDetail.remark === srcDetail.remark, cpDetail);
+  assert('复制单开工日期 = 当天', String(cpDetail.plan_start).slice(0, 10) === today, cpDetail);
+  assert('复制单完工日期留空', !cpDetail.plan_end, cpDetail);
+  assert('复制单未继承已领料 / 已入库数量（均为 0）',
+    Number(cpDetail.issued_qty) === 0 && Number(cpDetail.received_qty) === 0, cpDetail);
+  assert('复制单状态非已完工（保存后可继续编辑）', cpDetail.status !== '已完工', cpDetail);
+
+  const patchEnd = await call('PUT', `/production/work-orders/${cp.id}`, {
+    productId, planQty: 120, bomVersion: cpDetail.bom_version, planStart: today, planEnd: today, remark: 'smoke-copy',
+  });
+  assert('保存后可编辑补录完工日期', patchEnd.status === 200, patchEnd.body);
+  const afterEnd = D(await call('GET', `/production/work-orders/${cp.id}`));
+  assert('补录后完工日期已写入', String(afterEnd.plan_end).slice(0, 10) === today, afterEnd);
+
+  const delCopy = await call('DELETE', `/production/work-orders/${cp.id}`);
+  assert('复制单未发生业务时可删除', delCopy.status === 200, delCopy.body);
 
   console.log(`\n结果：PASS ${pass} / FAIL ${fail}`);
   if (fail > 0) process.exit(1);

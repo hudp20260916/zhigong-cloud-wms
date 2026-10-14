@@ -11,9 +11,13 @@ import {
   Modal,
   Select,
   Space,
+  Spin,
+  Tag,
+  Typography,
   message,
 } from 'antd';
 import {
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   ExportOutlined,
@@ -58,6 +62,12 @@ export default function WorkOrderPage() {
   /** 详情加载中：期间禁用表单，避免对尚未回填的空表单误操作 */
   const [detailLoading, setDetailLoading] = useState(false);
   /**
+   * 物料需求预览：选中主产品 + 填了计划产量后，按 BOM 展开计算需求并与现有库存比对。
+   * 纯展示用，缺料不拦截保存。
+   */
+  const [bomPreview, setBomPreview] = useState<{ items: any[]; shortageCount: number } | null>(null);
+  const [bomLoading, setBomLoading] = useState(false);
+  /**
    * 编辑态的「计划数量下限」约束：{ issued, received, min }。
    * 已领部分 / 已入部分都允许编辑，但改后的计划量不能低于已发生的量，
    * 否则会出现「领了 100、入了 100，计划却写成 50」的账实倒挂。
@@ -68,7 +78,12 @@ export default function WorkOrderPage() {
    * 领料明细 / 入库流水都是按原主产品的 BOM 展开的，换产品会让已扣物料与已入成品对不上账。
    */
   const [productLocked, setProductLocked] = useState(false);
+  /** 复制模式：以选中工单为模板开新单（业务字段带出，单号重新生成） */
+  const [copying, setCopying] = useState(false);
   const [form] = Form.useForm();
+  // 实时监听这两个字段：主产品一变就重算 BOM 明细，计划产量一变就重算需求数量与库存比对
+  const watchProductId = Form.useWatch('productId', form);
+  const watchPlanQty = Form.useWatch('planQty', form);
 
   // 选中行从当前列表实时取：翻页/刷新后旧的 selectedId 天然失效，
   // 避免对一条已经不在当前页的数据执行写操作
@@ -86,6 +101,9 @@ export default function WorkOrderPage() {
     const st: any = location.state;
     if (st?.prefill?.productId) {
       setEditing(null);
+      setCopying(false);
+      setEditFloor(null);
+      setProductLocked(false);
       // 只暂存，实际写表单交给下方 useEffect（挂载前 setFieldsValue 会被清空）
       setPendingDetail({ productId: st.prefill.productId, planQty: 100 });
       setOpen(true);
@@ -96,6 +114,9 @@ export default function WorkOrderPage() {
 
   function openCreate() {
     setEditing(null);
+    setCopying(false);
+    setEditFloor(null);
+    setProductLocked(false);
     setPendingDetail({ planQty: 100 });
     setOpen(true);
   }
@@ -134,6 +155,37 @@ export default function WorkOrderPage() {
   }
 
   /**
+   * 复制工单：以选中工单为模板开一张新单。
+   * - 单号由服务端按现有编码规则生成，表单里本来就没有单号字段，无法手填；
+   * - 计划开工日默认填当天（可改），计划完工日留空（保存后可编辑补录）；
+   * - 其余业务字段（主产品、计划产量、BOM 版本、备注）原样带出；
+   * - 新单没有领料 / 入库记录，所以主产品不锁、也不受计划量下限约束。
+   */
+  async function openCopy(row: any) {
+    setDetailLoading(true);
+    try {
+      const detail = await productionApi.workOrderDetail(row.id);
+      setEditing(null); // 复制出来的是新单，保存时走 create
+      setCopying(true);
+      setEditFloor(null);
+      setProductLocked(false);
+      setPendingDetail({
+        productId: detail.product_id,
+        planQty: detail.plan_qty,
+        bomVersion: detail.bom_version,
+        planStart: dayVal(today()),
+        planEnd: undefined,
+        remark: detail.remark,
+      });
+      setOpen(true);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  /**
    * 弹窗挂载完成后统一回填。
    *
    * ⚠️ 依赖必须带全 open / editing / pendingDetail：只写 [open] 会让 effect 闭包
@@ -146,6 +198,27 @@ export default function WorkOrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, pendingDetail]);
 
+  /**
+   * 物料需求预览：主产品 + 计划产量齐了就拉一次（300ms 防抖，避免输数量时狂刷接口）。
+   * 缺料只更新展示，**不写任何校验规则**，保存不受影响。
+   */
+  useEffect(() => {
+    if (!open || !watchProductId || !Number(watchPlanQty)) {
+      setBomPreview(null);
+      return;
+    }
+    setBomLoading(true);
+    const timer = setTimeout(() => {
+      productionApi
+        .bomPreview(Number(watchProductId), Number(watchPlanQty))
+        .then((res: any) => setBomPreview(res?.data ?? res))
+        .catch(() => setBomPreview(null))
+        .finally(() => setBomLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, watchProductId, watchPlanQty]);
+
   /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
   function closeModal() {
     setOpen(false);
@@ -154,20 +227,23 @@ export default function WorkOrderPage() {
     setDetailLoading(false);
     setEditFloor(null);
     setProductLocked(false);
+    setCopying(false);
+    setBomPreview(null);
+    setBomLoading(false);
     form.resetFields();
   }
 
   /** 顶部操作按钮的类型 */
-  type WoAction = 'print' | 'receive' | 'issue' | 'edit' | 'delete';
+  type WoAction = 'print' | 'copy' | 'receive' | 'issue' | 'edit' | 'delete';
 
   /**
    * 状态联动校验：返回 null 表示允许执行，否则返回提示文案并阻止执行。
    *
    * 口径与后端 workOrders.ts 的 canEdit / canReceive / delete 校验保持一致：
    * - 无 production.wo.update 权限 → 阻止「编辑」「删除」，提示无权限（而不是点了没反应）
-   * - 编辑**不看状态**：部分领料、部分入库、已完工都允许改计划量。
-   *   （已完工不能拦，否则「计划量改到等于已入库量」会立刻判完工并被永久锁死，无法追加生产。）
-   *   真正的门槛是「计划量不得低于 max(已领料, 已入库)」，由表单校验 + 后端 PUT 双重兜底。
+   * - 已完工是终态：禁止编辑（前端提前提示，真正的拦截在后端 PUT，列表 canEdit 同口径）
+   * - 除已完工外，编辑**不看状态**：部分领料、部分入库都允许改计划量，
+   *   真正的门槛是「计划量不得低于 max(已领料, 已入库)」，由表单校验 + 提交预检 + 后端 PUT 三重兜底。
    * - 入库已满（remainQty <= 0）  → 阻止「去入库」「去领料」（料已够、无需再领/再入）
    * - 已发生领料或入库            → 阻止「删除」（后端 delete 硬性要求两者都为 0）
    * - 已完工                      → 阻止除编辑外的写操作（已入满，无需再领/再入，也不许删）
@@ -179,9 +255,13 @@ export default function WorkOrderPage() {
    */
   function blockReason(row: any, action: WoAction): string | null {
     if (action === 'print') return null;
+    // 复制本质是新建：只要能建单就能复制，不看原单状态（已完工的单也能拿来当模板）
+    if (action === 'copy') return hasPerm('production.wo.create') ? null : '无新建权限';
     if ((action === 'edit' || action === 'delete') && !hasPerm('production.wo.update'))
       return '无编辑 / 删除权限';
-    // 编辑只看权限与（后端兜底的）计划量下限，不看工单状态
+    // 已完工是终态，禁止编辑（后端 PUT 与列表 canEdit 同口径，这里只是提前给提示）
+    if (action === 'edit' && row.status === '已完工') return '已完工，禁止编辑';
+    // 编辑不再因「已领料 / 已入库」被拦：部分领料、部分入库都允许改计划量
     if (action === 'edit') return null;
     if (row.status === '已完工') return '已完工';
     const remain = Number(row.remainQty ?? 0);
@@ -323,6 +403,15 @@ export default function WorkOrderPage() {
               />
             </span>
 
+            {/* 复制工单：以选中工单为模板开新单，放在「去入库」之前 */}
+            <Button
+              className="btn-action btn-key"
+              icon={<CopyOutlined />}
+              onClick={() => runAction('copy', (row) => void openCopy(row))}
+            >
+              复制工单
+            </Button>
+
             <Button
               className="btn-action btn-key"
               icon={<ImportOutlined />}
@@ -462,7 +551,7 @@ export default function WorkOrderPage() {
 
       <Modal
         open={open}
-        title={editing ? '编辑生产工单' : '新增生产工单'}
+        title={editing ? '编辑生产工单' : copying ? '复制新增生产工单' : '新增生产工单'}
         onCancel={closeModal}
         onOk={submit}
         // 不使用 destroyOnClose：它与 Form 的 preserve={false} 叠加会让
@@ -474,6 +563,10 @@ export default function WorkOrderPage() {
         {/* 渲染兜底：表单里有 Select / DatePicker / InputNumber，一旦回填值类型不对
             （如日期传了字符串）会在渲染期抛错并让整页白屏。包一层后只这块降级成错误提示。 */}
         <ErrorBoundary label="工单表单">
+        {/* 单号由服务端按编码规则生成，表单里没有该字段，也就无法手填 */}
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+          工单号由系统自动生成，无需填写
+        </Typography.Text>
         <Form form={form} layout="vertical" preserve={false} disabled={detailLoading}>
           <Form.Item
             name="productId"
@@ -534,6 +627,74 @@ export default function WorkOrderPage() {
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={2} />
           </Form.Item>
+
+          {/* 物料需求预估：选了主产品 + 填了计划产量后出现。
+              纯提示，缺料不校验、不拦截，建单照常可保存。 */}
+          {(bomLoading || bomPreview) && (
+            <>
+              <Divider style={{ margin: '12px 0 8px' }} />
+              <Space align="center" style={{ marginBottom: 8 }} wrap>
+                <Typography.Text strong>物料需求预估</Typography.Text>
+                {bomLoading && <Spin size="small" />}
+                {!bomLoading && bomPreview && bomPreview.items.length > 0 && (
+                  <Tag color={bomPreview.shortageCount > 0 ? 'warning' : 'success'}>
+                    {bomPreview.shortageCount > 0 ? `${bomPreview.shortageCount} 项缺料` : '库存充足'}
+                  </Tag>
+                )}
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  缺料仅作提示，不影响建单保存
+                </Typography.Text>
+              </Space>
+              {bomPreview && bomPreview.items.length === 0 && (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  该产品未配置 BOM，无物料需求
+                </Typography.Text>
+              )}
+              {bomPreview && bomPreview.items.length > 0 && (
+                <ResponsiveTable
+                  size="small"
+                  rowKey="materialId"
+                  dataSource={bomPreview.items}
+                  pagination={false}
+                  scroll={{ y: 200 }}
+                  columns={[
+                    {
+                      title: '物料编码',
+                      dataIndex: 'materialCode',
+                      width: 120,
+                      render: (v) => <CopyableCode value={v} />,
+                    },
+                    { title: '物料名称', dataIndex: 'materialName', ellipsis: true },
+                    { title: '规格', dataIndex: 'spec', width: 120, ellipsis: true },
+                    {
+                      title: '需求数量',
+                      dataIndex: 'requireQty',
+                      width: 110,
+                      className: 'mono',
+                      render: (v, r) => `${v}${r.unit ? ` ${r.unit}` : ''}`,
+                    },
+                    {
+                      title: '现有库存',
+                      dataIndex: 'stock',
+                      width: 100,
+                      className: 'mono',
+                      render: (v, r) => `${v}${r.unit ? ` ${r.unit}` : ''}`,
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'enough',
+                      width: 90,
+                      render: (ok, r) => (
+                        <Tag color={ok ? 'success' : 'error'} title={ok ? undefined : `缺口 ${r.shortage}`}>
+                          {ok ? '充足' : '缺料'}
+                        </Tag>
+                      ),
+                    },
+                  ]}
+                />
+              )}
+            </>
+          )}
         </Form>
         </ErrorBoundary>
       </Modal>

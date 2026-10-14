@@ -262,6 +262,69 @@ assert(calls.length === beforeWo2 + 1, '工单：关闭后重新打开仍只回�
 assert(woCall2 && woCall2.planQty === 300, '工单：重开后数据仍正确（无空表单）');
 
 // ============================================================
+// 4.5) 生产工单页「复制工单」：editing 必须置 null（保存走 create），
+//      开工日期填当天、完工日期留空，其余业务字段原样带出
+// ============================================================
+const todayStr = dayjs().format('YYYY-MM-DD');
+let copyMode = '';
+
+function MirrorWorkOrderCopy() {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [copying, setCopying] = useState(false);
+  const [pendingDetail, setPendingDetail] = useState(null);
+
+  async function openCopy(row) {
+    const detail = await Promise.resolve(woDetail); // 模拟 productionApi.workOrderDetail
+    setEditing(null); // 复制出来的是新单 → submit 走 create 分支
+    setCopying(true);
+    setPendingDetail({
+      productId: detail.product_id,
+      planQty: detail.plan_qty,
+      bomVersion: detail.bom_version,
+      planStart: dayVal(todayStr),
+      planEnd: undefined,
+      remark: detail.remark,
+    });
+    setOpen(true);
+  }
+
+  // 与 WorkOrderPage 的 modal title / submit 分支同口径
+  copyMode = editing ? 'edit' : copying ? 'copy' : 'create';
+
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) form.setFieldsValue(pendingDetail);
+  }, [open, editing, pendingDetail]);
+
+  return React.createElement('button', { id: 'wo-copy', onClick: () => void openCopy(woRow) }, 'wo-copy');
+}
+
+const c3b = document.createElement('div');
+document.body.appendChild(c3b);
+const root3b = createRoot(c3b);
+await act(async () => {
+  root3b.render(React.createElement(MirrorWorkOrderCopy));
+});
+const beforeCopy = calls.length;
+await act(async () => {
+  document.getElementById('wo-copy').click();
+});
+const woCopyCall = calls[calls.length - 1];
+console.log('工单复制回填值:', JSON.stringify(woCopyCall));
+assert(calls.length === beforeCopy + 1, '复制：一次打开只回填一次（无重复 / 无遗漏）');
+assert(copyMode === 'copy', `复制：走新建分支（editing=null → create），当前=${copyMode}`);
+assert(woCopyCall && woCopyCall.productId === 12, '复制：主产品沿用原单');
+assert(woCopyCall && woCopyCall.planQty === 300, '复制：计划产量沿用原单 300');
+assert(woCopyCall && woCopyCall.bomVersion === 'V2.0', '复制：BOM 版本沿用原单');
+assert(woCopyCall && woCopyCall.remark === '工单备注', '复制：备注沿用原单');
+assert(
+  woCopyCall?.planStart?.format('YYYY-MM-DD') === todayStr,
+  '复制：开工日期默认当天（且是 dayjs 对象）',
+);
+assert(woCopyCall && woCopyCall.planEnd === undefined, '复制：完工日期留空（保存后可补录）');
+
+// ============================================================
 // 5) 用户管理页（同步 openEdit → pendingUser → effect 回填）
 //    逻辑与 UserPage.tsx 完全一致
 // ============================================================

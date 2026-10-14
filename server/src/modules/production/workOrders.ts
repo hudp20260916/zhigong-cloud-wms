@@ -7,7 +7,8 @@ import { writeLog } from '../../core/log.js';
 import { requirePerm } from '../../middleware/auth.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
-import { availableToReceive, refreshWorkOrder } from './helpers.js';
+import { availableToReceive, cartonQtyOf, refreshWorkOrder, round } from './helpers.js';
+import { expandBom } from '../../core/bom.js';
 
 export const workOrderRouter = Router();
 
@@ -87,9 +88,10 @@ workOrderRouter.get('/', requirePerm('production.wo.view'), (req, res) => {
       ...r,
       remainQty: remain,
       canReceive: canReceive && remain > 0,
-      // 已领部分 / 已入部分 / 已完工都允许编辑（改计划量），真正的门槛是
-      // PUT 接口的「计划量不得低于已领料、已入库数量」下限校验。
-      canEdit: ctx.permissions.includes('production.wo.update'),
+      // 已领部分 / 已入部分都允许编辑（改计划量），真正的门槛是
+      // PUT 接口的「计划量不得低于已领料、已入库数量」下限校验；
+      // 「已完工」是终态，不允许编辑（后端 PUT 同样拦截，避免只靠前端控制）。
+      canEdit: ctx.permissions.includes('production.wo.update') && r.status !== '已完工',
     };
   });
 
@@ -107,6 +109,55 @@ workOrderRouter.get('/options', requirePerm('production.wo.view'), (req, res) =>
     )
     .all() as any[];
   ok(res, rows.map((r) => ({ ...r, availableQty: availableToReceive(r.id) })));
+});
+
+/**
+ * 新建 / 复制工单时的「物料需求预览」。
+ *
+ * 只做展示用，**不参与任何校验拦截**（缺料也允许建单，由后续领料 / 入库环节再处理）。
+ * 需求量走与领料、直接扣料完全相同的口径：expandBom 展开（虚拟件穿透为实阶物料）+ 外箱耗材，
+ * 这样前端显示的「充足 / 缺料」与实际扣减一致，不会出现「提示充足但一入库就缺料」。
+ */
+workOrderRouter.get('/bom-preview', requirePerm('production.wo.view'), (req, res) => {
+  const productId = Number(req.query.productId);
+  const planQty = Number(req.query.planQty);
+  if (!productId) throw Err.badRequest('请先选择主产品');
+  if (!Number.isFinite(planQty) || planQty <= 0) {
+    ok(res, { items: [], shortageCount: 0 });
+    return;
+  }
+
+  const product = db.prepare(`SELECT * FROM products WHERE id = ?`).get(productId) as any;
+  if (!product) throw Err.notFound('成品档案不存在');
+
+  const need = new Map<number, number>();
+  for (const [mid, qty] of expandBom(productId, planQty)) {
+    need.set(mid, (need.get(mid) ?? 0) + qty);
+  }
+  const cartonQty = cartonQtyOf(product, planQty);
+  if (cartonQty > 0 && product.carton_material_id) {
+    need.set(product.carton_material_id, (need.get(product.carton_material_id) ?? 0) + cartonQty);
+  }
+
+  const stockOf = db.prepare(`SELECT code, name, spec, unit, current_stock FROM materials WHERE id = ?`);
+  const items = [...need].map(([materialId, requireQty]) => {
+    const m = stockOf.get(materialId) as any;
+    const stock = Number(m?.current_stock ?? 0);
+    const req = round(requireQty);
+    return {
+      materialId,
+      materialCode: m?.code ?? '',
+      materialName: m?.name ?? `#${materialId}`,
+      spec: m?.spec ?? '',
+      unit: m?.unit ?? '',
+      requireQty: req,
+      stock: round(stock),
+      shortage: Math.max(0, round(req - stock)),
+      enough: stock >= req - 1e-9,
+    };
+  });
+
+  ok(res, { items, shortageCount: items.filter((i) => !i.enough).length });
 });
 
 /**
@@ -240,9 +291,9 @@ workOrderRouter.put('/:id', requirePerm('production.wo.update'), (req, res) => {
       });
     }
 
-    // 不因「已完工」拒绝编辑：把计划量改到等于已入库量时工单会立刻判完工，
-    // 若此时再禁止编辑，就再也调不大、无法追加生产，等于把单据锁死。
-    // 真正要守住的是下面的计划量下限，改大改小都受它约束。
+    // 已完工是终态：不允许再改。防止已结案单据被回改导致统计与台账口径漂移。
+    // （需要继续生产时走「复制工单」开新单，而不是改旧单。）
+    if (wo.status === '已完工') throw Err.conflict('该工单已完工，禁止修改');
 
     // 计划数量下限：不得小于「已领料数量」和「已入库数量」中的较大者。
     // 否则会出现「领了 100 / 入了 100，计划却写成 50」这种账实倒挂，
