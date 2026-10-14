@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Input, Select, Space, Tabs, Tag, message } from 'antd';
 import { EyeOutlined, PlusOutlined, ShoppingOutlined, ToolOutlined } from '@ant-design/icons';
@@ -17,6 +17,35 @@ import { useAuthStore } from '../../stores/auth';
 import StockDetailModal from './StockDetailModal';
 import WarehouseModal, { type WarehouseRow } from './WarehouseModal';
 import type { ItemType } from '@shared/enums';
+
+/** 仓库类型能放这个品类吗（与服务端 kindFits 同口径：main 两类都放） */
+function fitsKind(w: any, itemType: ItemType): boolean {
+  if (w.kind === 'main') return true;
+  return itemType === 'material' ? w.kind === 'material' : w.kind === 'product';
+}
+
+/** 可用 = 品类匹配 且 未停用 */
+function whUsable(w: any, itemType: ItemType): boolean {
+  return w.status === '启用' && fitsKind(w, itemType);
+}
+
+/**
+ * 该品类的「首选仓」：**主仓库优先**，其次该品类默认仓，最后第一个可用仓。
+ *
+ * 只在两种时机用它：
+ *   1. 进入页面时自动选中一次（需求：默认选中主仓库）；
+ *   2. 切换页签且当前仓放不下新品类时。
+ * 用户手动选过之后，任何 re-render / 查询 / 排序 / 翻页都不会再覆盖。
+ */
+function preferredWarehouse(whs: any[], itemType: ItemType): number | null {
+  const usable = whs.filter((w) => whUsable(w, itemType));
+  return (
+    usable.find((w) => w.kind === 'main' && w.is_default)?.id ??
+    usable.find((w) => w.is_default)?.id ??
+    usable[0]?.id ??
+    null
+  );
+}
 
 interface StockRow {
   id: number;
@@ -68,24 +97,60 @@ export default function StockPage() {
   const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
   const selected = list.find((r) => r.id === selectedId) ?? null;
 
-  // 切换页签时仓库也要跟着换：成品只能看成品仓，物料只能看物料仓
+  /**
+   * 进入页面时自动选中一次「主仓库」（主仓优先 → 该品类默认仓 → 第一个可用仓）。
+   *
+   * 关键：**只在仓库列表首次加载完成时执行一次**（whInit 闸门）。
+   * 之后无论组件 re-render 多少次、翻页 / 排序 / 搜索多少次，都不会再覆盖用户的选择，
+   * 用户手动选的仓会一直保持到他自己改或重新进入页面。
+   */
+  const whInit = useRef(false);
   useEffect(() => {
-    setWhId(null);
-    patchParams({ warehouseId: undefined, page: 1 });
-  }, [tab]);
+    if (whInit.current || whs.length === 0) return;
+    whInit.current = true;
+    const def = preferredWarehouse(whs, tab);
+    setWhId(def);
+    patchParams({ warehouseId: def ?? undefined, page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whs]);
 
+  /** 用户手动切换仓库 —— 这是「锁定」下来的选择，之后不会再被自动改掉 */
   function pickWarehouse(v: number | null) {
     setWhId(v);
     clearSelection();
     patchParams({ warehouseId: v ?? undefined, page: 1 });
   }
 
-  /** 保存后：列表 + 仓库下拉 + 筛选条件三处一起刷新 */
+  /**
+   * 切换子页面（成品库存 / 物料库存）。
+   *
+   * 不再无条件把仓库打回默认值：当前仓能放新品类就原样保留（主仓两类都能放，
+   * 所以选了主仓来回切页签不会被重置）；只有放不下时才切到新品类的首选仓，
+   * 并明确告诉用户为什么要换。
+   */
+  function switchTab(next: ItemType) {
+    if (next === tab) return;
+    const cur = whId ? whs.find((w) => w.id === whId) : null;
+    const keep = cur ? whUsable(cur, next) : false;
+    setTab(next);
+    clearSelection();
+    if (keep) {
+      patchParams({ page: 1 });
+      return;
+    }
+    const def = preferredWarehouse(whs, next);
+    setWhId(def);
+    patchParams({ warehouseId: def ?? undefined, page: 1 });
+    if (cur) {
+      const to = whs.find((w) => w.id === def)?.name ?? '全部仓库';
+      message.info(`仓库「${cur.name}」不存放${next === 'material' ? '物料' : '成品'}，已切换到「${to}」`);
+    }
+  }
+
+  /** 保存后：列表 + 仓库下拉一起刷新，但**保留用户当前选择的仓**（需求：只有手动切换才变） */
   function onWarehouseSaved() {
     clearWarehouseOptionsCache();
     loadWarehouses();
-    setWhId(null);
-    patchParams({ warehouseId: undefined, page: 1 });
     reload();
   }
 
@@ -173,10 +238,11 @@ export default function StockPage() {
           allowClear
           placeholder="全部仓库（合计）"
           options={whs
-            .filter((w) => (tab === 'material' ? w.kind !== 'product' : w.kind !== 'material'))
+            .filter((w) => fitsKind(w, tab))
             .map((w) => ({
               value: w.id,
-              label: `${w.name}${w.status === '停用' ? '（停用）' : ''}`,
+              // 标出「默认」，让用户一眼看出进页面时自动选中的是哪一个
+              label: `${w.name}${w.is_default ? '（默认）' : ''}${w.status === '停用' ? '（停用）' : ''}`,
             }))}
         />
         <PermGate permission="stock.warehouse.manage">
@@ -199,11 +265,7 @@ export default function StockPage() {
 
       <Tabs
         activeKey={tab}
-        onChange={(k) => {
-          setTab(k as ItemType);
-          clearSelection(); // 换页签后行数据全变，选中态必须清掉
-          patchParams({ page: 1 });
-        }}
+        onChange={(k) => switchTab(k as ItemType)}
         items={[
           { key: 'product', label: '成品库存' },
           { key: 'material', label: '物料库存' },
