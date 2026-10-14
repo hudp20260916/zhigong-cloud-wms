@@ -1,9 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Form, Input, Modal, Popconfirm, Space, Table, message } from 'antd';
-import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Input, Space, Table, message } from 'antd';
+import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, ResponsiveTable, DockAction, ImportExcelModal } from '../../components';
+import {
+  PermGate,
+  ResponsiveTable,
+  DockAction,
+  ImportExcelModal,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
+} from '../../components';
 import { exportCsv } from '../../utils/exportCsv';
 
 interface Partner {
@@ -28,6 +38,9 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
   const [form] = Form.useForm();
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   function openCreate() {
     setEditing(null);
@@ -94,6 +107,7 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
         message.success(copying ? `${label}副本已创建` : `${label}已创建`);
       }
       closeModal();
+      clearSelection(); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -132,11 +146,61 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
         </Space>
       }
     >
+      {/* 操作区：原按钮在每行末尾重复展示，几十条数据时很杂乱，统一集中到表格上方右侧。
+          交互与生产工单页一致 —— 先在列表中点行选中，再点这里的按钮。
+          权限点沿用原操作列的 archive.partner.manage（无权限时不渲染，与 PermGate 一致）。 */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <TopActionBar>
+          <RowActionButton
+            text="修改"
+            icon={<EditOutlined />}
+            permission="archive.partner.manage"
+            selected={selected}
+            tipName={label}
+            onAction={(row) => openEdit(row)}
+          />
+          <RowActionButton
+            text="复制"
+            icon={<CopyOutlined />}
+            permission="archive.partner.manage"
+            selected={selected}
+            tipName={label}
+            onAction={(row) => openCopy(row)}
+          />
+          <RowActionButton
+            text="删除"
+            icon={<DeleteOutlined />}
+            danger
+            permission="archive.partner.manage"
+            selected={selected}
+            tipName={label}
+            confirm={(row) => ({
+              title: `确认删除该${label}？`,
+              content: `${label}「${row.name}」删除后不可恢复。`,
+            })}
+            onAction={async (row) => {
+              try {
+                if (isSupplier) await archiveApi.deleteSupplier(row.id);
+                else await archiveApi.deleteCustomer(row.id);
+                message.success('已删除');
+                clearSelection(); // 删除后该行已不存在，必须清空选中
+                reload();
+              } catch (e: any) {
+                message.error(e.message);
+              }
+            }}
+          />
+        </TopActionBar>
+      </div>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,
@@ -149,44 +213,6 @@ export default function PartnerPage({ kind }: { kind: 'supplier' | 'customer' })
           { title: '联系人', dataIndex: 'contact', width: 120 },
           { title: '联系电话', dataIndex: 'phone', width: 150 },
           { title: '备注', dataIndex: 'remark' },
-          {
-            title: '操作',
-            width: 190,
-            render: (_, r) => (
-              <PermGate permission="archive.partner.manage">
-                <Space size={0}>
-                  <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    修改
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => openCopy(r)}
-                  >
-                    复制
-                  </Button>
-                  <Popconfirm
-                    title={`确认删除该${label}？`}
-                    onConfirm={async () => {
-                      try {
-                        if (isSupplier) await archiveApi.deleteSupplier(r.id);
-                        else await archiveApi.deleteCustomer(r.id);
-                        message.success('已删除');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                </Space>
-              </PermGate>
-            ),
-          },
         ]}
       />
 

@@ -5,15 +5,12 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Space,
   Switch,
-  Table,
   Tag,
   message,
 } from 'antd';
-import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
+import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import { archiveApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -24,6 +21,10 @@ import {
   DockAction,
   ImportExcelModal,
   SearchableSelect,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
 } from '../../components';
 import { exportCsv } from '../../utils/exportCsv';
 
@@ -53,6 +54,9 @@ export default function MaterialPage() {
   /** 复制模式：带出源记录全部内容但编码置空，由服务端按编码规则重新生成 */
   const [copying, setCopying] = useState(false);
   const [form] = Form.useForm();
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi
@@ -129,6 +133,7 @@ export default function MaterialPage() {
         message.success(copying ? '物料副本已创建' : '物料已创建');
       }
       closeModal();
+      clearSelection(); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -170,11 +175,62 @@ export default function MaterialPage() {
         </Space>
       }
     >
+      {/* 操作区：原按钮在每行末尾重复展示，几十条数据时很杂乱，统一集中到表格上方右侧。
+          交互与生产工单页一致 —— 先在列表中点行选中，再点这里的按钮。 */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <TopActionBar>
+          <RowActionButton
+            text="修改"
+            icon={<EditOutlined />}
+            permission="archive.material.manage"
+            selected={selected}
+            tipName="物料"
+            onAction={(row) => openEdit(row)}
+          />
+          <RowActionButton
+            text="复制"
+            icon={<CopyOutlined />}
+            permission="archive.material.manage"
+            selected={selected}
+            tipName="物料"
+            onAction={(row) => openCopy(row)}
+          />
+          <RowActionButton
+            text="删除"
+            icon={<DeleteOutlined />}
+            danger
+            permission="archive.material.manage"
+            selected={selected}
+            tipName="物料"
+            disabledReason={(row) =>
+              Number(row.current_stock) > 0 ? '该物料库存不为 0，禁止删除' : null
+            }
+            confirm={(row) => ({
+              title: '确认删除该物料？',
+              content: `物料「${row.name}」删除后不可恢复。`,
+            })}
+            onAction={async (row) => {
+              try {
+                await archiveApi.deleteMaterial(row.id);
+                message.success('已删除');
+                clearSelection();
+                reload();
+              } catch (e: any) {
+                message.error(e.message);
+              }
+            }}
+          />
+        </TopActionBar>
+      </div>
+
       <ResponsiveTable
         rowKey="id"
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1100 }}
         pagination={{
           current: params.page,
@@ -211,45 +267,6 @@ export default function MaterialPage() {
             dataIndex: 'is_virtual',
             width: 90,
             render: (v) => (v === 1 ? <Tag color="purple">虚拟件</Tag> : <Tag>实阶物料</Tag>),
-          },
-          {
-            title: '操作',
-            width: 190,
-            fixed: 'right',
-            render: (_, r) => (
-              <PermGate permission="archive.material.manage">
-                <Space size={4}>
-                  <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    修改
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => openCopy(r)}
-                  >
-                    复制
-                  </Button>
-                  <Popconfirm
-                    title="确认删除该物料？"
-                    description="库存不为 0 时禁止删除"
-                    onConfirm={async () => {
-                      try {
-                        await archiveApi.deleteMaterial(r.id);
-                        message.success('已删除');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                </Space>
-              </PermGate>
-            ),
           },
         ]}
       />

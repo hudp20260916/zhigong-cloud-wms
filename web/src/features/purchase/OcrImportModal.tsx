@@ -4,7 +4,6 @@ import {
   Button,
   Descriptions,
   InputNumber,
-  Modal,
   Select,
   Space,
   Spin,
@@ -16,7 +15,7 @@ import {
 } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
-import { ResponsiveTable } from '../../components';
+import { ResponsiveTable, Modal } from '../../components';
 
 export interface OcrDraft {
   requestId: string;

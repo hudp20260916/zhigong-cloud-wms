@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Modal, Space, Steps, Upload, message } from 'antd';
+import { Alert, Button, Space, Steps, Upload, message } from 'antd';
+// 可拖拽弹窗（同目录，不走 components/index 以免形成循环依赖）
+import { Modal } from './DraggableModal';
 import { CloudDownloadOutlined, ImportOutlined, InboxOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { importApi } from '../api';

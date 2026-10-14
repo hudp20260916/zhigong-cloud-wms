@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tag, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Input, InputNumber, Radio, Select, Space, Table, Tag, message } from 'antd';
+import { PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { archiveApi, productionApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, StatusTag, ResponsiveTable, DockAction, CopyableCode, FilterBar } from '../../components';
+import {
+  PermGate,
+  StatusTag,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -25,6 +36,9 @@ export default function DefectivePage() {
   const [issueInfo, setIssueInfo] = useState<any>(null);
   const [produceQty, setProduceQty] = useState<number>(0);
   const location = useLocation();
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
@@ -126,7 +140,41 @@ export default function DefectivePage() {
       }
     >
       {/* 需求 26：日期区间 + 物料名称/编码包含字筛选 */}
-      <FilterBar onReset={() => patchParams({ materialKeyword: '', dateFrom: '', dateTo: '' })}>
+      <FilterBar
+        onReset={() => patchParams({ materialKeyword: '', dateFrom: '', dateTo: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原「撤销」在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             是否可撤销由列表接口返回的 canUndo 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionButton
+              text="撤销"
+              icon={<RollbackOutlined />}
+              danger
+              selected={selected}
+              tipName="不良品出库单"
+              disabledReason={(r) => (r.canUndo ? null : '该出库单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该不良品出库单？',
+                content:
+                  r.source_type === 'issue'
+                    ? '撤销后物料库存回补，工单可入库余量随之恢复，且不可恢复。'
+                    : `出库单「${r.out_no}」撤销后物料库存回补，且不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await warehouseApi.undoDefective(r.id);
+                  message.success('已撤销');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
+      >
         <DatePicker
           style={{ width: 140 }}
           placeholder="开始日期"
@@ -153,6 +201,9 @@ export default function DefectivePage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
@@ -163,14 +214,6 @@ export default function DefectivePage() {
           { title: '出库内容', dataIndex: 'content', ellipsis: true },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          { title: '操作', width: 90, render: (_, r) => r.canUndo ? (
-            <Popconfirm title="确认撤销？" description={r.source_type === 'issue' ? '撤销后物料库存回补，工单可入库余量随之恢复' : undefined} onConfirm={async () => {
-              try { await warehouseApi.undoDefective(r.id); message.success('已撤销'); reload(); }
-              catch (e: any) { message.error(e.message); }
-            }}>
-              <Button type="link" size="small" danger>撤销</Button>
-            </Popconfirm>
-          ) : '-' },
         ]}
       />
 

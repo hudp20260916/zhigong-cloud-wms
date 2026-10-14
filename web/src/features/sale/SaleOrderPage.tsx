@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, DatePicker, Input, InputNumber, Modal, Select, Space, Table, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Button, Card, DatePicker, Input, InputNumber, Select, Space, message } from 'antd';
+import { ExportOutlined, PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { archiveApi, saleApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -15,6 +15,11 @@ import {
   DetailTable,
   FilterBar,
   SearchableSelect,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -40,6 +45,9 @@ export default function SaleOrderPage() {
   const [orderDate, setOrderDate] = useState(today());
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
@@ -99,6 +107,37 @@ export default function SaleOrderPage() {
       {/* 需求 12：单号（顶部搜索）+ 客户 + 产品名称筛选 */}
       <FilterBar
         onReset={() => patchParams({ keyword: '', customerId: '', productName: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             可用动作由列表接口返回的 canDeliver / canReturn 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="销售订单">
+              <PrintButton
+                docType="sale_order"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="去出库"
+              icon={<ExportOutlined />}
+              selected={selected}
+              tipName="销售订单"
+              disabledReason={(r) => (r.canDeliver ? null : '该销售单当前不可出库')}
+              onAction={(r) => navigate('/sale/deliveries', { state: { orderId: r.id } })}
+            />
+            <RowActionButton
+              text="去退货"
+              icon={<RollbackOutlined />}
+              selected={selected}
+              tipName="销售订单"
+              disabledReason={(r) => (r.canReturn ? null : '该销售单当前不可退货')}
+              onAction={(r) => navigate('/sale/returns', { state: { orderId: r.id } })}
+            />
+          </TopActionBar>
+        }
       >
         <Select
           allowClear
@@ -124,6 +163,9 @@ export default function SaleOrderPage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1200 }}
         // 需求 12：点击行（客户所在行）展开销售明细
         expandable={{
@@ -164,25 +206,6 @@ export default function SaleOrderPage() {
           { title: '金额', dataIndex: 'total_amount', width: 120, render: (v) => <PriceText value={v} /> },
           { title: '状态', dataIndex: 'status', width: 100, render: (v) => <StatusTag status={v} /> },
           { title: '制单人', dataIndex: 'creator_name', width: 110 },
-          {
-            title: '操作',
-            width: 220,
-            render: (_, r) => (
-              <Space size={0}>
-                <PrintButton docType="sale_order" id={r.id} />
-                {r.canDeliver && (
-                  <Button type="link" size="small" onClick={() => navigate('/sale/deliveries', { state: { orderId: r.id } })}>
-                    去出库
-                  </Button>
-                )}
-                {r.canReturn && (
-                  <Button type="link" size="small" onClick={() => navigate('/sale/returns', { state: { orderId: r.id } })}>
-                    去退货
-                  </Button>
-                )}
-              </Space>
-            ),
-          },
         ]}
       />
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Tooltip, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Input, InputNumber, Select, Space, Tooltip, message } from 'antd';
+import { PlusOutlined, UndoOutlined } from '@ant-design/icons';
 import { productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -12,6 +12,11 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  // 弹窗统一走「可拖拽 Modal」，用法与 antd Modal 完全一致
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -55,6 +60,9 @@ export default function MaterialReturnPage() {
   const [rows, setRows] = useState<ReturnRow[]>([]);
   const [remark, setRemark] = useState('');
   const [saving, setSaving] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -202,10 +210,42 @@ export default function MaterialReturnPage() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="生产退料用于「领了料但没投产」的部分：按原领料单原量退回物料库存，并同步核减工单已领产量，可入库上限随之收敛到实际投产数量"
+        message="生产退料用于「领了料但没投产」的部分：按原领料单原量退回物料库存，并同步核减工单已领产量，可入库上限随之收敛到实际投产数量。操作请先在列表中点选一行，再点右上角按钮"
       />
 
-      <FilterBar onReset={() => patchParams({ keyword: '', dateFrom: '', dateTo: '', materialKeyword: '' })}>
+      <FilterBar
+        onReset={() => patchParams({ keyword: '', dateFrom: '', dateTo: '', materialKeyword: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             退料单目前只有「撤销」一个行操作，原按钮在每行末尾重复展示且多数行是「-」，
+             统一集中到顶部后列表只留业务字段。 */
+          <TopActionBar>
+            <RowActionButton
+              text="撤销"
+              icon={<UndoOutlined />}
+              danger
+              permission="production.issue.create"
+              selected={selected}
+              tipName="退料单"
+              disabledReason={(r) => (r.canUndo ? null : '该退料单已撤销，无需重复撤销')}
+              confirm={() => ({
+                title: '确认撤销该退料单？',
+                content: '物料将按原量扣回，工单已领产量恢复。',
+              })}
+              onAction={async (r) => {
+                try {
+                  await productionApi.undoMaterialReturn(r.id);
+                  message.success('已撤销，物料已扣回');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
+      >
         <DatePicker
           style={{ width: 140 }}
           placeholder="开始日期"
@@ -233,6 +273,9 @@ export default function MaterialReturnPage() {
         loading={loading}
         dataSource={list}
         scroll={{ x: 1400 }}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         expandable={{
           expandedRowRender: (r) => (
             <DetailTable
@@ -274,31 +317,6 @@ export default function MaterialReturnPage() {
           { title: '退料内容', dataIndex: 'content', ellipsis: true },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 100,
-            fixed: 'right',
-            render: (_, r) =>
-              r.canUndo ? (
-                <Popconfirm
-                  title="确认撤销该退料单？"
-                  description="物料将按原量扣回，工单已领产量恢复"
-                  onConfirm={async () => {
-                    try {
-                      await productionApi.undoMaterialReturn(r.id);
-                      message.success('已撤销，物料已扣回');
-                      reload();
-                    } catch (e: any) {
-                      message.error(e.message);
-                    }
-                  }}
-                >
-                  <Button type="link" size="small" danger>撤销</Button>
-                </Popconfirm>
-              ) : (
-                '-'
-              ),
-          },
         ]}
       />
 

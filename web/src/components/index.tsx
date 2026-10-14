@@ -10,6 +10,8 @@ import { DetailTable } from './DetailTable';
 import { FilterBar } from './FilterBar';
 import { SearchableSelect } from './SearchableSelect';
 import { ErrorBoundary } from './ErrorBoundary';
+import { Modal } from './DraggableModal';
+import { TopActionBar, RowActionButton, RowActionGate, useRowSelect } from './RowActions';
 
 export {
   PrintButton,
@@ -21,6 +23,12 @@ export {
   FilterBar,
   SearchableSelect,
   ErrorBoundary,
+  // 全系统统一弹窗：用法与 antd Modal 完全一致，额外支持标题栏拖拽
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */

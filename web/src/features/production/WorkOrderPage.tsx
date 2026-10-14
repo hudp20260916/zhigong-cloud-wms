@@ -8,7 +8,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Space,
   Spin,
@@ -36,6 +35,10 @@ import {
   CopyableCode,
   FilterBar,
   ErrorBoundary,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -274,23 +277,6 @@ export default function WorkOrderPage() {
     return null;
   }
 
-  /**
-   * 顶部按钮统一入口：先校验「已选中」与「状态允许」，
-   * 通过后把该行数据交给 fn 执行（回调里拿到的 row 一定非空）。
-   */
-  function runAction(action: WoAction, fn: (row: any) => void) {
-    if (!selected) {
-      message.warning('请先选择一条工单');
-      return;
-    }
-    const reason = blockReason(selected, action);
-    if (reason) {
-      message.warning(reason);
-      return;
-    }
-    fn(selected);
-  }
-
   async function submit() {
     try {
       const v = await form.validateFields();
@@ -376,24 +362,19 @@ export default function WorkOrderPage() {
         }
         extra={
           /* 选中行操作组：先在列表中点行选中，再点这里执行。
-             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。 */
-          <Space size={8} wrap>
+             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             容器与「未选中 / 状态不允许」的拦截统一用 RowActionGate（全系统同一套）。 */
+          <TopActionBar>
             {/* 打印沿用 PrintButton：服务端渲染 + 弹窗被拦截时的提示逻辑都不变。
-                未选中行时在捕获阶段拦下点击，只提示、不打开打印窗口。 */}
+                未选中行时由 RowActionGate 在捕获阶段拦下点击，只提示、不打开打印窗口。 */}
             <span
-              onClickCapture={(e) => {
-                if (!selected) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  message.warning('请先选择一条工单');
-                }
-              }}
               onClick={() => {
                 // 打印为只读操作，与其它操作统一收尾：清选中 + 刷新
                 setSelectedId(null);
                 reload();
               }}
             >
+              <RowActionGate selected={selected} tipName="工单">
               <PrintButton
                 docType="work_order"
                 id={selected?.id ?? 0}
@@ -401,78 +382,79 @@ export default function WorkOrderPage() {
                 size="middle"
                 className="btn-action"
               />
+              </RowActionGate>
             </span>
 
-            {/* 复制工单：以选中工单为模板开新单，放在「去入库」之前 */}
-            <Button
-              className="btn-action btn-key"
+            {/* 复制工单：以选中工单为模板开新单，放在「去入库」之前。
+                状态门禁统一复用 blockReason（与后端 canEdit / canReceive 同口径）。 */}
+            <RowActionButton
+              text="复制工单"
               icon={<CopyOutlined />}
-              onClick={() => runAction('copy', (row) => void openCopy(row))}
-            >
-              复制工单
-            </Button>
+              hideWhenNoPermission={false}
+              selected={selected}
+              tipName="工单"
+              disabledReason={(row) => blockReason(row, 'copy')}
+              onAction={(row) => void openCopy(row)}
+            />
 
-            <Button
-              className="btn-action btn-key"
+            <RowActionButton
+              text="去入库"
               icon={<ImportOutlined />}
-              onClick={() =>
-                runAction('receive', (row) =>
-                  navigate('/production/receipts', { state: { workOrderId: row.id } }),
-                )
+              hideWhenNoPermission={false}
+              selected={selected}
+              tipName="工单"
+              disabledReason={(row) => blockReason(row, 'receive')}
+              onAction={(row) =>
+                navigate('/production/receipts', { state: { workOrderId: row.id } })
               }
-            >
-              去入库
-            </Button>
+            />
 
-            <Button
-              className="btn-action btn-key"
+            <RowActionButton
+              text="去领料"
               icon={<ExportOutlined />}
-              onClick={() =>
-                runAction('issue', (row) =>
-                  navigate('/production/issues', { state: { workOrderId: row.id } }),
-                )
+              hideWhenNoPermission={false}
+              selected={selected}
+              tipName="工单"
+              disabledReason={(row) => blockReason(row, 'issue')}
+              onAction={(row) =>
+                navigate('/production/issues', { state: { workOrderId: row.id } })
               }
-            >
-              去领料
-            </Button>
+            />
 
-            <Button
-              className="btn-action btn-key"
+            <RowActionButton
+              text="编辑"
               icon={<EditOutlined />}
-              onClick={() => runAction('edit', (row) => void openEdit(row))}
-            >
-              编辑
-            </Button>
+              hideWhenNoPermission={false}
+              selected={selected}
+              tipName="工单"
+              disabledReason={(row) => blockReason(row, 'edit')}
+              onAction={(row) => void openEdit(row)}
+            />
 
-            <Button
-              className="btn-action btn-danger-action"
-              danger
+            <RowActionButton
+              text="删除"
               icon={<DeleteOutlined />}
-              onClick={() =>
-                runAction('delete', (row) => {
-                  Modal.confirm({
-                    title: '确认删除该工单？',
-                    content: `工单「${row.wo_no}」删除后不可恢复。`,
-                    okText: '确认删除',
-                    okButtonProps: { danger: true },
-                    cancelText: '取消',
-                    onOk: async () => {
-                      try {
-                        await productionApi.deleteWorkOrder(row.id);
-                        message.success('已删除');
-                        setSelectedId(null);
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    },
-                  });
-                })
-              }
-            >
-              删除
-            </Button>
-          </Space>
+              danger
+              hideWhenNoPermission={false}
+              selected={selected}
+              tipName="工单"
+              disabledReason={(row) => blockReason(row, 'delete')}
+              confirm={(row) => ({
+                title: '确认删除该工单？',
+                content: `工单「${row.wo_no}」删除后不可恢复。`,
+              })}
+              onAction={async (row) => {
+                try {
+                  await productionApi.deleteWorkOrder(row.id);
+                  message.success('已删除');
+                  setSelectedId(null);
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
         }
       >
         <DatePicker

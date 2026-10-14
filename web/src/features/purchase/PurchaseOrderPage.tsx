@@ -10,8 +10,6 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Radio,
   Select,
   Space,
@@ -21,7 +19,12 @@ import {
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  EditOutlined,
+  ImportOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { useRowDetail } from '../../hooks/useRowDetail';
@@ -35,6 +38,11 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -96,6 +104,9 @@ export default function PurchaseOrderPage() {
     remark: '',
   });
   const [saving, setSaving] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
@@ -309,6 +320,63 @@ export default function PurchaseOrderPage() {
         onReset={() =>
           patchParams({ keyword: '', status: '', supplierId: '', materialKeyword: '' })
         }
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             可用状态由列表接口返回的 canEdit / canReceive / canDelete 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionGate
+              selected={selected}
+              tipName="采购订单"
+              disabledReason={(r) => (r.isParent ? '汇总父单不支持打印' : null)}
+            >
+              <PrintButton
+                docType="purchase_order"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="去入库"
+              icon={<ImportOutlined />}
+              selected={selected}
+              tipName="采购订单"
+              disabledReason={(r) => (r.canReceive ? null : '该订单当前不可入库')}
+              onAction={(r) => navigate('/purchase/receipts', { state: { receiveOrderId: r.id } })}
+            />
+            <RowActionButton
+              text="编辑"
+              icon={<EditOutlined />}
+              selected={selected}
+              tipName="采购订单"
+              disabledReason={(r) => (r.canEdit ? null : '该订单当前不可编辑')}
+              onAction={(r) => openEdit(r)}
+            />
+            <RowActionButton
+              text="删除"
+              icon={<DeleteOutlined />}
+              danger
+              selected={selected}
+              tipName="采购订单"
+              disabledReason={(r) => (r.canDelete ? null : '该订单当前不可删除')}
+              confirm={(r) => ({
+                title: '确认删除该采购订单？',
+                content: `订单「${r.order_no}」删除后不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await purchaseApi.deleteOrder(r.id);
+                  message.success('已删除');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
       >
         <Select
           allowClear
@@ -348,6 +416,9 @@ export default function PurchaseOrderPage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1400 }}
         // 需求 5：点击行展开该订单的采购明细
         expandable={{
@@ -416,56 +487,6 @@ export default function PurchaseOrderPage() {
             dataIndex: 'status',
             width: 100,
             render: (v, r) => (r.isParent ? <Tag>汇总父单</Tag> : <StatusTag status={v} />),
-          },
-          {
-            title: '操作',
-            width: 220,
-            fixed: 'right',
-            render: (_, r) => (
-              <Space size={0}>
-                {/* 汇总父单没有明细行，不提供打印 */}
-                {!r.isParent && <PrintButton docType="purchase_order" id={r.id} />}
-                {/* 去入库：仅进行中且有未入库明细的非父单显示（需求 4.1） */}
-                {r.canReceive && (
-                  <Tooltip title="跳转采购入库并自动带出该订单">
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() =>
-                        navigate('/purchase/receipts', { state: { receiveOrderId: r.id } })
-                      }
-                    >
-                      去入库
-                    </Button>
-                  </Tooltip>
-                )}
-                {r.canEdit && (
-                  <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
-                  </Button>
-                )}
-                {r.canDelete && (
-                  <Popconfirm
-                    title="确认删除该采购订单？"
-                    description="删除后不可恢复"
-                    onConfirm={async () => {
-                      try {
-                        await purchaseApi.deleteOrder(r.id);
-                        message.success('已删除');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                )}
-                {!r.canEdit && !r.canReceive && !r.canDelete && <Typography.Text type="secondary">-</Typography.Text>}
-              </Space>
-            ),
           },
         ]}
       />

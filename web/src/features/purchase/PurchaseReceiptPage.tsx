@@ -10,8 +10,6 @@ import {
   Empty,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Select,
   Space,
   Table,
@@ -19,7 +17,12 @@ import {
   Tooltip,
   message,
 } from 'antd';
-import { PlusOutlined, ScanOutlined } from '@ant-design/icons';
+import {
+  EditOutlined,
+  PlusOutlined,
+  RollbackOutlined,
+  ScanOutlined,
+} from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -33,6 +36,11 @@ import {
   DetailTable,
   FilterBar,
   SearchableSelect,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -83,6 +91,9 @@ export default function PurchaseReceiptPage() {
   const [repriceItems, setRepriceItems] = useState<any[]>([]);
   const [repricePrices, setRepricePrices] = useState<Record<number, number | string>>({});
   const [repriceSaving, setRepriceSaving] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
@@ -296,6 +307,52 @@ export default function PurchaseReceiptPage() {
         onReset={() =>
           patchParams({ keyword: '', supplierId: '', materialKeyword: '', dateFrom: '', dateTo: '' })
         }
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原「打印 / 撤销」在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             是否可撤销由列表接口返回的 canUndo 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="采购入库单">
+              <PrintButton
+                docType="purchase_receipt"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            {/* 补录 / 修改单价：原来藏在「展开明细」里，统一提到顶部操作区 */}
+            <RowActionButton
+              text="补录单价"
+              icon={<EditOutlined />}
+              selected={selected}
+              tipName="采购入库单"
+              disabledReason={(r) => (r.canUndo ? null : '该入库单当前不可修改单价')}
+              onAction={(r) => openReprice(r)}
+            />
+            <RowActionButton
+              text="撤销"
+              icon={<RollbackOutlined />}
+              danger
+              selected={selected}
+              tipName="采购入库单"
+              disabledReason={(r) => (r.canUndo ? null : '该入库单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该入库单？',
+                content: `入库单「${r.purchaseContent ?? r.supplier_name ?? ''}」撤销后库存将回滚至入库前，且不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await purchaseApi.undoReceipt(r.id);
+                  message.success('已撤销，库存已回滚');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
       >
         <DatePicker
           style={{ width: 140 }}
@@ -333,6 +390,9 @@ export default function PurchaseReceiptPage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1300 }}
         // 需求 6：点击行展开入库明细
         expandable={{
@@ -359,14 +419,8 @@ export default function PurchaseReceiptPage() {
                   { title: '备注', dataIndex: 'remark' },
                 ]}
               />
-              {/* 需求：单价允许 0、价格后补——展开明细后补录/修改单价 */}
-              {r.canUndo && (
-                <div style={{ marginTop: 8, textAlign: 'right' }}>
-                  <Button size="small" type="link" onClick={() => openReprice(r)}>
-                    补录 / 修改单价
-                  </Button>
-                </div>
-              )}
+              {/* 需求：单价允许 0、价格后补。入口已统一提到顶部操作区「补录单价」，
+                  这里不再重复放按钮（避免同一操作两处入口、样式不一致）。 */}
             </div>
           ),
           onExpand: (expanded, r) => {
@@ -404,37 +458,6 @@ export default function PurchaseReceiptPage() {
           { title: '来源', dataIndex: 'source', width: 90, render: (v) => (v === 'ocr' ? <Tag color="purple">识别入库</Tag> : <Tag>关联订单</Tag>) },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 170,
-            fixed: 'right',
-            render: (_, r: any) => (
-              <Space size={0}>
-                <PrintButton docType="purchase_receipt" id={r.id} />
-                {r.canUndo ? (
-                  <Popconfirm
-                    title="确认撤销该入库单？"
-                    description="撤销后库存将回滚至入库前"
-                    onConfirm={async () => {
-                      try {
-                        await purchaseApi.undoReceipt(r.id);
-                        message.success('已撤销，库存已回滚');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      撤销
-                    </Button>
-                  </Popconfirm>
-                ) : (
-                  '-'
-                )}
-              </Space>
-            ),
-          },
         ]}
       />
 

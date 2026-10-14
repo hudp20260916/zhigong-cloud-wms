@@ -1,9 +1,21 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Input, InputNumber, Select, Space, Table, Tag, message } from 'antd';
+import { CheckCircleOutlined, EyeOutlined, PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermGate, PriceText, StatusTag, ResponsiveTable, DockAction, CopyableCode, FilterBar } from '../../components';
+import {
+  PermGate,
+  PriceText,
+  StatusTag,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  FilterBar,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 import type { ItemType } from '@shared/enums';
@@ -18,6 +30,9 @@ export default function StockCheckPage() {
   const [remark, setRemark] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [detail, setDetail] = useState<any>(null);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     Promise.all([archiveApi.materialOptions(), archiveApi.productOptions()])
@@ -73,7 +88,72 @@ export default function StockCheckPage() {
         message="盘点单录入后即进入待审核状态，被盘点对象的出入库将被锁定；管理员审核后系统按差异自动生成调整流水" />
 
       {/* 需求 24：日期区间 + 状态 + 盘点对象包含字筛选 */}
-      <FilterBar onReset={() => patchParams({ status: '', itemKeyword: '', dateFrom: '', dateTo: '' })}>
+      <FilterBar
+        onReset={() => patchParams({ status: '', itemKeyword: '', dateFrom: '', dateTo: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原「查看明细 / 审核 / 撤销」在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             是否可审核 / 可撤销由列表接口返回的 canAudit / canUndo 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionButton
+              text="查看明细"
+              icon={<EyeOutlined />}
+              selected={selected}
+              tipName="盘点单"
+              onAction={async (r) => {
+                try {
+                  setDetail(await warehouseApi.checkDetail(r.id));
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+            <RowActionButton
+              text="审核"
+              icon={<CheckCircleOutlined />}
+              selected={selected}
+              tipName="盘点单"
+              disabledReason={(r) => (r.canAudit ? null : '该盘点单当前不可审核')}
+              confirm={(r) => ({
+                title: '确认审核该盘点单？',
+                content: `盘点单「${r.check_no}」审核后将按差异自动生成库存调整流水。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await warehouseApi.auditCheck(r.id);
+                  message.success('已审核，调整流水已生成');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+            <RowActionButton
+              text="撤销"
+              icon={<RollbackOutlined />}
+              danger
+              selected={selected}
+              tipName="盘点单"
+              disabledReason={(r) => (r.canUndo ? null : '该盘点单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该盘点单？',
+                content: `盘点单「${r.check_no}」撤销后不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await warehouseApi.undoCheck(r.id);
+                  message.success('已撤销');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
+      >
         <DatePicker
           style={{ width: 140 }}
           placeholder="开始日期"
@@ -112,6 +192,9 @@ export default function StockCheckPage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1100 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
@@ -125,34 +208,6 @@ export default function StockCheckPage() {
             dataIndex: 'status',
             width: 100,
             render: (v) => <Tag color={v === '待审核' ? 'orange' : v === '已审核' ? 'green' : 'default'}>{v}</Tag>,
-          },
-          {
-            title: '操作',
-            width: 200,
-            render: (_, r) => (
-              <Space size={0}>
-                <Button type="link" size="small" onClick={async () => {
-                  try { setDetail(await warehouseApi.checkDetail(r.id)); } catch (e: any) { message.error(e.message); }
-                }}>查看明细</Button>
-                {r.canAudit && (
-                  <Popconfirm title="确认审核该盘点单？" description="将按差异自动生成库存调整流水"
-                    onConfirm={async () => {
-                      try { await warehouseApi.auditCheck(r.id); message.success('已审核，调整流水已生成'); reload(); }
-                      catch (e: any) { message.error(e.message); }
-                    }}>
-                    <Button type="link" size="small">审核</Button>
-                  </Popconfirm>
-                )}
-                {r.canUndo && (
-                  <Popconfirm title="确认撤销？" onConfirm={async () => {
-                    try { await warehouseApi.undoCheck(r.id); message.success('已撤销'); reload(); }
-                    catch (e: any) { message.error(e.message); }
-                  }}>
-                    <Button type="link" size="small" danger>撤销</Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            ),
           },
         ]}
       />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Divider, Input, InputNumber, Select, Space, Tabs, message } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import { archiveApi, inventoryApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -9,6 +10,9 @@ import {
   ImportExcelModal,
   FilterBar,
   CopyableCode,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import type { ItemType } from '@shared/enums';
@@ -41,10 +45,17 @@ export default function InitialStockPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [pickId, setPickId] = useState<number | undefined>();
   const [saving, setSaving] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  // 已录清单的主键是 item_id（不是 id），所以给 keyOf，选中态才能对上
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect(
+    (r: any) => r.item_id,
+  );
+  const selected = list.find((r) => r.item_id === selectedId) ?? null;
 
   // 切换 Tab 时刷新已录清单
   useEffect(() => {
     patchParams({ page: 1 });
+    clearSelection(); // 换 Tab 就是换一批数据，清空选中避免误操作到另一类对象
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -76,6 +87,29 @@ export default function InitialStockPage() {
       },
     ]);
     setPickId(undefined);
+  }
+
+  /** 顶部「修改」：把已录清单里选中的记录带进下方录入区，改完再统一提交（设定语义，覆盖旧值） */
+  function editRow(row: any) {
+    const key = `${tab}-${row.item_id}`;
+    if (rows.some((r) => r.key === key)) {
+      message.warning('该对象已在录入清单中');
+      return;
+    }
+    setRows((prev) => [
+      ...prev,
+      {
+        key,
+        itemId: Number(row.item_id),
+        itemType: tab,
+        code: row.code,
+        name: row.name,
+        unit: row.unit,
+        qty: Number(row.initial_qty ?? 0),
+        price: Number(row.initial_price ?? 0),
+      },
+    ]);
+    clearSelection();
   }
 
   async function submit() {
@@ -147,7 +181,22 @@ export default function InitialStockPage() {
           ]}
         />
 
-        <FilterBar onReset={() => patchParams({ keyword: '' })}>
+        <FilterBar
+          onReset={() => patchParams({ keyword: '' })}
+          extra={
+            /* 操作区与筛选控件同一行、靠右。已录清单原来是纯只读、没有任何操作入口，
+               统一成「先选中一行，再点按钮」后，由这里把选中记录带进下方录入区修改。 */
+            <TopActionBar>
+              <RowActionButton
+                text="修改"
+                icon={<EditOutlined />}
+                selected={selected}
+                tipName="期初记录"
+                onAction={(row) => editRow(row)}
+              />
+            </TopActionBar>
+          }
+        >
           <Input
             allowClear
             style={{ width: 240 }}
@@ -162,6 +211,10 @@ export default function InitialStockPage() {
           size="small"
           loading={loading}
           dataSource={list}
+          rowSelection={rowSelection}
+          // 移动端卡片模式「点卡片即选中」的入口（keyOf 已在 useRowSelect 里指定为 item_id）
+          onRowClick={onRowClick}
+          selectedRowKeys={selectedId === null ? [] : [selectedId]}
           scroll={{ x: 900 }}
           pagination={{
             current: params.page,

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Input, List, Modal, Space, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Input, List, Space, Tag, Typography, message } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
 import { api } from '../../api/client';
-import { PermPage } from '../../components';
+import { PermPage, Modal } from '../../components';
 
 const CONFIRM_TEXT = '确认清空';
 

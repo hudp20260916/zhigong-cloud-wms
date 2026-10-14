@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, DatePicker, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, message } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Button, Card, DatePicker, Input, InputNumber, Select, Space, Table, message } from 'antd';
+import { PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { archiveApi, warehouseApi } from '../../api';
 import { useList } from '../../hooks/useList';
@@ -14,6 +14,11 @@ import {
   CopyableCode,
   FilterBar,
   SearchableSelect,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -30,6 +35,9 @@ export default function MaterialSalePage() {
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const location = useLocation();
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.materialOptions().then(setMaterials).catch(() => undefined);
@@ -94,7 +102,46 @@ export default function MaterialSalePage() {
       }
     >
       {/* 需求 25：日期区间 + 客户 + 物料名称/编码包含字筛选 */}
-      <FilterBar onReset={() => patchParams({ customerId: '', materialKeyword: '', dateFrom: '', dateTo: '' })}>
+      <FilterBar
+        onReset={() => patchParams({ customerId: '', materialKeyword: '', dateFrom: '', dateTo: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原「打印 / 撤销」在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             是否可撤销由列表接口返回的 canUndo 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="物料销售单">
+              <PrintButton
+                docType="material_sale"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="撤销"
+              icon={<RollbackOutlined />}
+              danger
+              selected={selected}
+              tipName="物料销售单"
+              disabledReason={(r) => (r.canUndo ? null : '该销售单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该物料销售单？',
+                content: `销售单「${r.sale_no}」撤销后物料库存回补，且不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await warehouseApi.undoMaterialSale(r.id);
+                  message.success('已撤销');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
+      >
         <DatePicker
           style={{ width: 140 }}
           placeholder="开始日期"
@@ -131,6 +178,9 @@ export default function MaterialSalePage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1200 }}
         pagination={{ current: params.page, pageSize: params.pageSize, total, onChange: (page, pageSize) => patchParams({ page, pageSize }) }}
         columns={[
@@ -141,20 +191,6 @@ export default function MaterialSalePage() {
           { title: '金额', dataIndex: 'total_amount', width: 120, render: (v) => <PriceText value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          { title: '操作', width: 160, render: (_, r) => (
-            <Space size={0}>
-              {/* 需求 25：物料销售打印模板 */}
-              <PrintButton docType="material_sale" id={r.id} />
-              {r.canUndo ? (
-                <Popconfirm title="确认撤销？" onConfirm={async () => {
-                  try { await warehouseApi.undoMaterialSale(r.id); message.success('已撤销'); reload(); }
-                  catch (e: any) { message.error(e.message); }
-                }}>
-                  <Button type="link" size="small" danger>撤销</Button>
-                </Popconfirm>
-              ) : null}
-            </Space>
-          ) },
         ]}
       />
 

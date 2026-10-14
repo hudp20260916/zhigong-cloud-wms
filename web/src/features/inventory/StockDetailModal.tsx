@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { DatePicker, Descriptions, Modal, Select, Space, Table, Tag, message } from 'antd';
+import { DatePicker, Descriptions, Select, Space, Table, Tag, message } from 'antd';
 import { inventoryApi } from '../../api';
 import { useAuthStore } from '../../stores/auth';
 import { exportCsv, today } from '../../utils/exportCsv';
 import type { ItemType } from '@shared/enums';
-import { ResponsiveTable } from '../../components';
+import { ResponsiveTable, Modal } from '../../components';
 
 interface Props {
   open: boolean;

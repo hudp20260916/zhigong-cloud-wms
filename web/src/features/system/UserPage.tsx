@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
-  Button,
   Card,
   Form,
   Input,
-  Modal,
   Select,
   Space,
   Table,
@@ -13,10 +11,19 @@ import {
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { EditOutlined, LockOutlined, PlusOutlined } from '@ant-design/icons';
 import { systemApi } from '../../api';
 import { useList } from '../../hooks/useList';
-import { PermPage, ResponsiveTable, DockAction } from '../../components';
+import {
+  PermPage,
+  ResponsiveTable,
+  DockAction,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
+} from '../../components';
 import { ROLE_LABEL } from '@shared/permissions';
 
 /** 密码强度校验：与服务端规则保持一致（字母 + 数字，至少 8 位） */
@@ -45,6 +52,9 @@ export default function UserPage() {
   const [pwdTarget, setPwdTarget] = useState<any>(null);
   const [pwdForm] = Form.useForm();
   const [newPwd, setNewPwd] = useState('');
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     systemApi
@@ -111,6 +121,7 @@ export default function UserPage() {
         message.success('账号已创建');
       }
       closeUserModal();
+      clearSelection(); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -125,6 +136,7 @@ export default function UserPage() {
         res?.kicked ? '密码已修改，该账号在线会话已被强制注销' : '密码已修改',
       );
       closePwdModal();
+      clearSelection();
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -155,11 +167,41 @@ export default function UserPage() {
           style={{ marginBottom: 12 }}
           message="全系统账号密码由管理员统一维护，普通账号无个人密码修改权限。修改密码后该账号的在线会话立即失效并被强制重新登录。"
         />
+        {/* 操作区：原「编辑 / 修改密码」在每行末尾重复展示，集中到表格上方右侧。
+            交互与生产工单页一致 —— 先在列表中点行选中，再点这里的按钮。
+            整页已由 PermPage 按 system.user.manage 拦截，这里不再重复挂权限点。 */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <TopActionBar>
+            <RowActionButton
+              text="编辑"
+              icon={<EditOutlined />}
+              selected={selected}
+              tipName="账号"
+              onAction={(row) => openEdit(row)}
+            />
+            <RowActionButton
+              text="修改密码"
+              icon={<LockOutlined />}
+              selected={selected}
+              tipName="账号"
+              onAction={(row) => {
+                setPwdTarget(row);
+                pwdForm.resetFields();
+                setNewPwd('');
+                setPwdOpen(true);
+              }}
+            />
+          </TopActionBar>
+        </div>
+
         <ResponsiveTable
           rowKey="id"
           size="small"
           loading={loading}
           dataSource={list}
+          rowSelection={rowSelection}
+          onRowClick={onRowClick}
+          selectedRowKeys={selectedId === null ? [] : [selectedId]}
           pagination={{
             current: params.page,
             pageSize: params.pageSize,
@@ -183,29 +225,6 @@ export default function UserPage() {
             },
             { title: '会话版本', dataIndex: 'session_version', width: 100, className: 'mono' },
             { title: '创建时间', dataIndex: 'created_at', width: 170, render: (v) => String(v).slice(0, 19).replace('T', ' ') },
-            {
-              title: '操作',
-              width: 160,
-              render: (_, r) => (
-                <Space size={0}>
-                  <Button type="link" size="small" onClick={() => openEdit(r)}>
-                    编辑
-                  </Button>
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => {
-                      setPwdTarget(r);
-                      pwdForm.resetFields();
-                      setNewPwd('');
-                      setPwdOpen(true);
-                    }}
-                  >
-                    修改密码
-                  </Button>
-                </Space>
-              ),
-            },
           ]}
         />
       </Card>

@@ -7,14 +7,12 @@ import {
   Empty,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Select,
   Space,
   Table,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, RollbackOutlined } from '@ant-design/icons';
 import { archiveApi, purchaseApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -26,6 +24,11 @@ import {
   DockAction,
   CopyableCode,
   FilterBar,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -50,6 +53,9 @@ export default function PurchaseReturnPage() {
   const [remark, setRemark] = useState('');
   const [items, setItems] = useState<ItemRow[]>([]);
   const [saving, setSaving] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     purchaseApi
@@ -147,6 +153,43 @@ export default function PurchaseReturnPage() {
         onReset={() =>
           patchParams({ keyword: '', supplierId: '', materialKeyword: '', dateFrom: '', dateTo: '' })
         }
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原「打印 / 撤销」在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             是否可撤销由列表接口返回的 canUndo 决定（后端算好，含权限）。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="采购退货单">
+              <PrintButton
+                docType="purchase_return"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="撤销"
+              icon={<RollbackOutlined />}
+              danger
+              selected={selected}
+              tipName="采购退货单"
+              disabledReason={(r) => (r.canUndo ? null : '该退货单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该退货单？',
+                content: `退货单「${r.return_no}」撤销后库存与应付账款将冲回，且不可恢复。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await purchaseApi.undoReturn(r.id);
+                  message.success('已撤销');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
       >
         <DatePicker
           style={{ width: 140 }}
@@ -184,6 +227,9 @@ export default function PurchaseReturnPage() {
         size="small"
         loading={loading}
         dataSource={list}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         scroll={{ x: 1100 }}
         pagination={{
           current: params.page,
@@ -199,35 +245,6 @@ export default function PurchaseReturnPage() {
           { title: '金额', dataIndex: 'total_amount', width: 110, render: (v) => <PriceText value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 160,
-            render: (_, r: any) => (
-              <Space size={0}>
-                <PrintButton docType="purchase_return" id={r.id} />
-                {r.canUndo ? (
-                  <Popconfirm
-                    title="确认撤销该退货单？"
-                    onConfirm={async () => {
-                      try {
-                        await purchaseApi.undoReturn(r.id);
-                        message.success('已撤销');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      撤销
-                    </Button>
-                  </Popconfirm>
-                ) : (
-                  '-'
-                )}
-              </Space>
-            ),
-          },
         ]}
       />
 

@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Col, Row, Select, Space, Statistic, Table, Tag, Button, message } from 'antd';
+import { Button, Card, Col, Row, Select, Space, Statistic, Tag, message } from 'antd';
+import { DeleteOutlined, ShoppingOutlined, ToolOutlined } from '@ant-design/icons';
 import { warehouseApi } from '../../api';
-import { PermGate, PriceText, ResponsiveTable } from '../../components';
+import {
+  PriceText,
+  ResponsiveTable,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import type { ItemType } from '@shared/enums';
 
@@ -19,6 +26,13 @@ export default function AlarmPage() {
   const [itemType, setItemType] = useState<ItemType>('material');
   const [level, setLevel] = useState<string>('');
   const [data, setData] = useState<any>(null);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互）。
+      本表 rowKey 是复合主键 `itemType-id`，所以必须给 keyOf，否则选中态对不上。 */
+  const keyOf = (r: any) => `${r.itemType}-${r.id}`;
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect(keyOf);
+  const selected = (data?.list ?? []).find((r: any) => keyOf(r) === selectedId) ?? null;
+  /** 缺货类等级才需要补货 / 排产 */
+  const isShortage = (r: any) => r?.level === '安全库存告警' || r?.level === '严重缺货';
 
   const load = () =>
     warehouseApi
@@ -28,6 +42,7 @@ export default function AlarmPage() {
 
   useEffect(() => {
     load();
+    clearSelection(); // 筛选条件变了，行数据跟着变，选中态必须清掉
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemType, level]);
 
@@ -83,11 +98,71 @@ export default function AlarmPage() {
         </Col>
       </Row>
 
+      {/* 操作区：原处置按钮在每行末尾，统一集中到表格上方右侧（先选中一行再操作） */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <TopActionBar>
+          <RowActionButton
+            text="去采购"
+            icon={<ShoppingOutlined />}
+            permission="purchase.order.create"
+            selected={selected}
+            tipName="预警记录"
+            disabledReason={(r) => {
+              if (r.itemType !== 'material') return '请先切换到「物料」维度';
+              return isShortage(r) ? null : '该记录无需采购处置';
+            }}
+            onAction={(r) => navigate('/purchase/orders', { state: { prefill: { materialIds: [r.id] } } })}
+          />
+          <RowActionButton
+            text="去创建工单"
+            icon={<ToolOutlined />}
+            permission="production.wo.create"
+            selected={selected}
+            tipName="预警记录"
+            disabledReason={(r) => {
+              if (r.itemType !== 'product') return '请先切换到「成品」维度';
+              return isShortage(r) ? null : '该记录无需排产处置';
+            }}
+            onAction={(r) => navigate('/production/work-orders', { state: { prefill: { productId: r.id } } })}
+          />
+          {/* 呆滞库存的两条处置路径：卖掉 或 报不良 */}
+          <RowActionButton
+            text="销售处理"
+            icon={<ShoppingOutlined />}
+            permission="warehouse.materialSale.create"
+            selected={selected}
+            tipName="预警记录"
+            disabledReason={(r) => (r.level === '呆滞库存' ? null : '仅呆滞库存需要销售处置')}
+            onAction={(r) =>
+              navigate('/warehouse/material-sales', {
+                state: { prefill: { materialId: r.id, materialName: r.name } },
+              })
+            }
+          />
+          <RowActionButton
+            text="不良品处理"
+            icon={<DeleteOutlined />}
+            permission="warehouse.defective.create"
+            selected={selected}
+            tipName="预警记录"
+            disabledReason={(r) => (r.level === '呆滞库存' ? null : '仅呆滞库存需要不良品处置')}
+            onAction={(r) =>
+              navigate('/warehouse/defectives', {
+                state: { prefill: { materialId: r.id, materialName: r.name } },
+              })
+            }
+          />
+        </TopActionBar>
+      </div>
+
       <ResponsiveTable
         rowKey={(r: any) => `${r.itemType}-${r.id}`}
         size="small"
         dataSource={data?.list ?? []}
         scroll={{ x: 1100 }}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         pagination={{ pageSize: 20 }}
         columns={[
           { title: '编码', dataIndex: 'code', width: 120 },
@@ -104,49 +179,6 @@ export default function AlarmPage() {
             dataIndex: 'level',
             width: 130,
             render: (v) => <Tag color={LEVEL_COLOR[v] ?? 'default'}>{v}</Tag>,
-          },
-          {
-            title: '处置',
-            width: 180,
-            render: (_v, r: any) => {
-              const isShortage = r.level === '安全库存告警' || r.level === '严重缺货';
-              if (isShortage && itemType === 'material') {
-                return (
-                  <PermGate permission="purchase.order.create">
-                    <Button type="link" size="small" onClick={() =>
-                      navigate('/purchase/orders', { state: { prefill: { materialIds: [r.id] } } })
-                    }>去采购</Button>
-                  </PermGate>
-                );
-              }
-              if (isShortage && itemType === 'product') {
-                return (
-                  <PermGate permission="production.wo.create">
-                    <Button type="link" size="small" onClick={() =>
-                      navigate('/production/work-orders', { state: { prefill: { productId: r.id } } })
-                    }>去创建工单</Button>
-                  </PermGate>
-                );
-              }
-              if (r.level === '呆滞库存') {
-                return (
-                  <Space size={0}>
-                    <PermGate permission="warehouse.materialSale.create">
-                      {/* 需求 22：带出物料，跳过去直接就是这张单 */}
-                      <Button type="link" size="small" onClick={() => navigate('/warehouse/material-sales', {
-                        state: { prefill: { materialId: r.id, materialName: r.name } },
-                      })}>销售处理</Button>
-                    </PermGate>
-                    <PermGate permission="warehouse.defective.create">
-                      <Button type="link" size="small" onClick={() => navigate('/warehouse/defectives', {
-                        state: { prefill: { materialId: r.id, materialName: r.name } },
-                      })}>不良品处理</Button>
-                    </PermGate>
-                  </Space>
-                );
-              }
-              return <span style={{ color: '#8c8c8c' }}>建议控制采购节奏</span>;
-            },
           },
         ]}
       />

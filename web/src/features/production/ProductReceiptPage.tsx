@@ -9,8 +9,6 @@ import {
   Empty,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Select,
   Space,
   Table,
@@ -18,7 +16,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, UndoOutlined } from '@ant-design/icons';
 import { archiveApi, productionApi } from '../../api';
 import { ApiError } from '../../api/client';
 import { useList } from '../../hooks/useList';
@@ -31,6 +29,12 @@ import {
   CopyableCode,
   FilterBar,
   SearchableSelect,
+  // 弹窗统一走「可拖拽 Modal」，用法与 antd Modal 完全一致
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
@@ -70,6 +74,9 @@ export default function ProductReceiptPage() {
   const [locked, setLocked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shortages, setShortages] = useState<any[] | null>(null);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     archiveApi.productOptions().then(setProducts).catch(() => undefined);
@@ -209,7 +216,46 @@ export default function ProductReceiptPage() {
       />
 
       {/* 需求 11：按入库类型筛选 */}
-      <FilterBar onReset={() => patchParams({ keyword: '', receiptType: '' })}>
+      <FilterBar
+        onReset={() => patchParams({ keyword: '', receiptType: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             打印只读（不设状态门禁），撤销沿用列表接口的 canUndo（后端已含权限与状态判断）。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="入库单">
+              <PrintButton
+                docType="product_receipt"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="撤销"
+              icon={<UndoOutlined />}
+              danger
+              permission="production.receipt.undo"
+              selected={selected}
+              tipName="入库单"
+              disabledReason={(r) => (r.canUndo ? null : '该入库单已撤销，无需重复撤销')}
+              confirm={() => ({
+                title: '确认撤销该成品入库单？',
+                content: '库存与工单已入库量将回滚。',
+              })}
+              onAction={async (r) => {
+                try {
+                  await productionApi.undoReceipt(r.id);
+                  message.success('已撤销，库存与工单已入库量已回滚');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
+      >
         <Select
           allowClear
           style={{ width: 220 }}
@@ -225,6 +271,9 @@ export default function ProductReceiptPage() {
         loading={loading}
         dataSource={list}
         scroll={{ x: 1300 }}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         pagination={{
           current: params.page,
           pageSize: params.pageSize,
@@ -246,36 +295,6 @@ export default function ProductReceiptPage() {
           { title: '关联领料单', dataIndex: 'issue_no', width: 150, render: (v) => <CopyableCode value={v} /> },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 160,
-            fixed: 'right',
-            render: (_, r) => (
-              <Space size={0}>
-                <PrintButton docType="product_receipt" id={r.id} />
-                {r.canUndo ? (
-                  <Popconfirm
-                    title="确认撤销该成品入库单？"
-                    onConfirm={async () => {
-                      try {
-                        await productionApi.undoReceipt(r.id);
-                        message.success('已撤销，库存与工单已入库量已回滚');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      撤销
-                    </Button>
-                  </Popconfirm>
-                ) : (
-                  '-'
-                )}
-              </Space>
-            ),
-          },
         ]}
       />
 

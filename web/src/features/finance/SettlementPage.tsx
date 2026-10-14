@@ -8,22 +8,31 @@ import {
   Descriptions,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Radio,
   Row,
   Select,
   Space,
   Statistic,
-  Table,
   Tag,
   message,
 } from 'antd';
-import { DollarOutlined, PlusOutlined } from '@ant-design/icons';
+import { DollarOutlined, PlusOutlined, UndoOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import { financeApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import { useRowDetail } from '../../hooks/useRowDetail';
-import { PermGate, PermPage, PriceText, ResponsiveTable, DockAction, CopyableCode, DetailTable } from '../../components';
+import {
+  PermGate,
+  PermPage,
+  PriceText,
+  ResponsiveTable,
+  DockAction,
+  CopyableCode,
+  DetailTable,
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  useRowSelect,
+} from '../../components';
 import { exportCsv, today } from '../../utils/exportCsv';
 import { dayVal } from '../../utils/date';
 
@@ -67,6 +76,10 @@ function SettlementInner() {
   const [preview, setPreview] = useState<any>(null);
   const [remark, setRemark] = useState('');
   const [detail, setDetail] = useState<any>(null);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互）。
+   *  ⚠️ 变量名用 selectedRow —— 本页 selected 已被「新建付款单选中的供应商」占用。 */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selectedRow = list.find((r) => r.id === selectedId) ?? null;
 
   const loadPayables = () =>
     financeApi
@@ -271,11 +284,58 @@ function SettlementInner() {
       </Card>
 
       <Card title="付款单记录" style={{ marginTop: 16 }}>
+        {/* 操作区：原按钮在每行末尾重复展示，几十条数据时很杂乱，统一集中到表格上方右侧。
+            交互与生产工单页一致 —— 先在列表中点行选中，再点这里的按钮。
+            能否撤销由列表接口返回的 canUndo 决定（后端算好，含权限）。 */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <TopActionBar>
+            <RowActionButton
+              text="核销明细"
+              icon={<UnorderedListOutlined />}
+              selected={selectedRow}
+              tipName="付款单"
+              onAction={async (r) => {
+                try {
+                  setDetail(await financeApi.settlementDetail(r.id));
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+            <RowActionButton
+              text="撤销"
+              icon={<UndoOutlined />}
+              danger
+              selected={selectedRow}
+              tipName="付款单"
+              disabledReason={(r) => (r.canUndo ? null : '该付款单当前不可撤销')}
+              confirm={(r) => ({
+                title: '确认撤销该付款单？',
+                content: `付款单「${r.settle_no}」撤销后将恢复各单据的未结算金额。`,
+              })}
+              onAction={async (r) => {
+                try {
+                  await financeApi.undoSettlement(r.id);
+                  message.success('已撤销');
+                  clearSelection();
+                  reload();
+                  loadPayables();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        </div>
+
         <ResponsiveTable
           rowKey="id"
           size="small"
           loading={loading}
           dataSource={list}
+          rowSelection={rowSelection}
+          onRowClick={onRowClick}
+          selectedRowKeys={selectedId === null ? [] : [selectedId]}
           scroll={{ x: 1100 }}
           pagination={{
             current: params.page,
@@ -322,47 +382,6 @@ function SettlementInner() {
               dataIndex: 'status',
               width: 90,
               render: (v) => <Tag color={v === '有效' ? 'green' : 'default'}>{v}</Tag>,
-            },
-            {
-              title: '操作',
-              width: 170,
-              render: (_, r) => (
-                <Space size={0}>
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={async () => {
-                      try {
-                        setDetail(await financeApi.settlementDetail(r.id));
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    核销明细
-                  </Button>
-                  {r.canUndo && (
-                    <Popconfirm
-                      title="确认撤销该付款单？"
-                      description="撤销后将恢复各单据的未结算金额"
-                      onConfirm={async () => {
-                        try {
-                          await financeApi.undoSettlement(r.id);
-                          message.success('已撤销');
-                          reload();
-                          loadPayables();
-                        } catch (e: any) {
-                          message.error(e.message);
-                        }
-                      }}
-                    >
-                      <Button type="link" size="small" danger>
-                        撤销
-                      </Button>
-                    </Popconfirm>
-                  )}
-                </Space>
-              ),
             },
           ]}
         />

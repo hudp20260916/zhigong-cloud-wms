@@ -8,15 +8,17 @@ import {
   Form,
   Input,
   InputNumber,
-  Modal,
-  Popconfirm,
   Select,
   Space,
-  Table,
   Tooltip,
   message,
 } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import {
+  ImportOutlined,
+  PlusOutlined,
+  RollbackOutlined,
+  UndoOutlined,
+} from '@ant-design/icons';
 import { productionApi } from '../../api';
 import { useList } from '../../hooks/useList';
 import {
@@ -29,6 +31,12 @@ import {
   CopyableCode,
   DetailTable,
   FilterBar,
+  // 弹窗统一走「可拖拽 Modal」，用法与 antd Modal 完全一致
+  Modal,
+  TopActionBar,
+  RowActionButton,
+  RowActionGate,
+  useRowSelect,
 } from '../../components';
 import { useRowDetail } from '../../hooks/useRowDetail';
 import { exportCsv, today } from '../../utils/exportCsv';
@@ -54,6 +62,9 @@ export default function IssuePage() {
     null,
   );
   const [ceilingLoading, setCeilingLoading] = useState(false);
+  /** 顶部操作区：先选中一行，再点按钮（与生产工单页同一套交互） */
+  const { selectedId, clearSelection, rowSelection, onRowClick } = useRowSelect();
+  const selected = list.find((r) => r.id === selectedId) ?? null;
 
   useEffect(() => {
     productionApi
@@ -158,12 +169,74 @@ export default function IssuePage() {
         type="info"
         showIcon
         style={{ marginBottom: 12 }}
-        message="领料必须关联生产工单，明细按 BOM 自动生成并穿透虚拟件；「去入库」仅在可入库余量大于 0 时出现"
+        message="领料必须关联生产工单，明细按 BOM 自动生成并穿透虚拟件；「去入库」仅在可入库余量大于 0 时可用。操作请先在列表中点选一行，再点右上角按钮"
       />
 
       {/* 需求 10：筛选结果优化 —— 日期区间 + 物料包含字 */}
       <FilterBar
         onReset={() => patchParams({ keyword: '', dateFrom: '', dateTo: '', materialKeyword: '' })}
+        extra={
+          /* 选中行操作组：先在列表中点行选中，再点这里执行。
+             原按钮在每行末尾重复展示，几十条数据时很杂乱，故集中到顶部。
+             可操作状态沿用列表接口返回的 canReceive / canUndo（后端已含权限与余量判断），
+             这里只负责把「不能点」翻译成具体提示文案。 */
+          <TopActionBar>
+            <RowActionGate selected={selected} tipName="领料单">
+              <PrintButton
+                docType="material_issue"
+                id={selected?.id ?? 0}
+                type="default"
+                className="btn-action"
+              />
+            </RowActionGate>
+            <RowActionButton
+              text="去入库"
+              icon={<ImportOutlined />}
+              permission="production.receipt.create"
+              selected={selected}
+              tipName="领料单"
+              disabledReason={(r) =>
+                r.canReceive
+                  ? null
+                  : r.status === '有效'
+                    ? '可入库余量为 0，请先继续领料'
+                    : '该领料单已撤销，不可入库'
+              }
+              onAction={(r) => navigate('/production/receipts', { state: { issueId: r.id } })}
+            />
+            <RowActionButton
+              text="去退料"
+              icon={<RollbackOutlined />}
+              selected={selected}
+              tipName="领料单"
+              disabledReason={(r) => (r.status === '有效' ? null : '该领料单已撤销，不可退料')}
+              onAction={(r) => navigate('/production/returns', { state: { issueId: r.id } })}
+            />
+            <RowActionButton
+              text="撤销"
+              icon={<UndoOutlined />}
+              danger
+              permission="production.receipt.undo"
+              selected={selected}
+              tipName="领料单"
+              disabledReason={(r) => (r.canUndo ? null : '该领料单已撤销，无需重复撤销')}
+              confirm={() => ({
+                title: '确认撤销该领料单？',
+                content: '已依据本单入库的成品需先撤销入库单。',
+              })}
+              onAction={async (r) => {
+                try {
+                  await productionApi.undoIssue(r.id);
+                  message.success('已撤销，物料库存已回滚');
+                  clearSelection();
+                  reload();
+                } catch (e: any) {
+                  message.error(e.message);
+                }
+              }}
+            />
+          </TopActionBar>
+        }
       >
         <DatePicker
           style={{ width: 140 }}
@@ -192,6 +265,9 @@ export default function IssuePage() {
         loading={loading}
         dataSource={list}
         scroll={{ x: 1400 }}
+        rowSelection={rowSelection}
+        onRowClick={onRowClick}
+        selectedRowKeys={selectedId === null ? [] : [selectedId]}
         // 需求 10：点击行展开领料明细
         expandable={{
           expandedRowRender: (r) => (
@@ -247,62 +323,6 @@ export default function IssuePage() {
           },
           { title: '操作人', dataIndex: 'operator_name', width: 110 },
           { title: '状态', dataIndex: 'status', width: 90, render: (v) => <StatusTag status={v} /> },
-          {
-            title: '操作',
-            width: 180,
-            fixed: 'right',
-            render: (_, r) => (
-              <Space size={0}>
-                <PrintButton docType="material_issue" id={r.id} />
-                {r.canReceive && (
-                  <Tooltip title="入库类型锁定「生产入库（已领料）」，数量自动锁定且只读">
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => navigate('/production/receipts', { state: { issueId: r.id } })}
-                    >
-                      去入库
-                    </Button>
-                  </Tooltip>
-                )}
-                {!r.canReceive && r.status === '有效' && (
-                  <Tooltip title="可入库余量为 0，请先继续领料">
-                    <span style={{ color: '#8c8c8c', fontSize: 12 }}>余量不足</span>
-                  </Tooltip>
-                )}
-                {r.status === '有效' && (
-                  <Tooltip title="领了料但未投产的部分，按原单原量退回物料库存">
-                    <Button
-                      type="link"
-                      size="small"
-                      onClick={() => navigate('/production/returns', { state: { issueId: r.id } })}
-                    >
-                      去退料
-                    </Button>
-                  </Tooltip>
-                )}
-                {r.canUndo && (
-                  <Popconfirm
-                    title="确认撤销该领料单？"
-                    description="已依据本单入库的成品需先撤销入库单"
-                    onConfirm={async () => {
-                      try {
-                        await productionApi.undoIssue(r.id);
-                        message.success('已撤销，物料库存已回滚');
-                        reload();
-                      } catch (e: any) {
-                        message.error(e.message);
-                      }
-                    }}
-                  >
-                    <Button type="link" size="small" danger>
-                      撤销
-                    </Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            ),
-          },
         ]}
       />
 
