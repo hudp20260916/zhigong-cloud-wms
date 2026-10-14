@@ -12,6 +12,13 @@ import { SearchableSelect } from './SearchableSelect';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Modal } from './DraggableModal';
 import { TopActionBar, RowActionButton, RowActionGate, useRowSelect } from './RowActions';
+import {
+  ColumnSettings,
+  columnKeyOf,
+  columnOptionsOf,
+  visibleColumnsOf,
+  useColumnHidden,
+} from './ColumnSettings';
 
 export {
   PrintButton,
@@ -29,6 +36,12 @@ export {
   RowActionButton,
   RowActionGate,
   useRowSelect,
+  // 表格列显示设置（工具栏「设置」按钮 + 勾选面板）
+  ColumnSettings,
+  columnKeyOf,
+  columnOptionsOf,
+  visibleColumnsOf,
+  useColumnHidden,
 };
 
 /** 按钮级权限控制：无权限时不渲染，避免出现「看得见点不动」 */
