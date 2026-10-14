@@ -141,24 +141,33 @@ productReceiptRouter.post('/', requirePerm('production.receipt.create'), (req, r
 
     // ---------- 类型一：生产入库（已领料） ----------
     if (d.receiptType === '生产入库（已领料）') {
-      if (!issueId || !woId) throw Err.badRequest('生产入库（已领料）必须关联领料单与工单');
-
-      const issue = db.prepare(`SELECT * FROM material_issues WHERE id = ?`).get(issueId) as any;
-      if (!issue) throw Err.notFound('领料单不存在');
-      if (issue.status !== DOC_STATUS.VALID) throw Err.conflict('该领料单已撤销');
+      if (!woId) throw Err.badRequest('生产入库（已领料）必须关联生产工单');
 
       const wo = db.prepare(`SELECT * FROM work_orders WHERE id = ?`).get(woId) as any;
       if (!wo) throw Err.notFound('生产工单不存在');
 
       const remain = availableToReceive(woId);
-      const lockQty = Math.min(Number(issue.produce_qty), remain);
+
+      let lockQty: number;
+      if (issueId) {
+        // 从领料单进入：数量 = min(本单领料产量, 工单可入库余量)
+        const issue = db.prepare(`SELECT * FROM material_issues WHERE id = ?`).get(issueId) as any;
+        if (!issue) throw Err.notFound('领料单不存在');
+        if (issue.status !== DOC_STATUS.VALID) throw Err.conflict('该领料单已撤销');
+        lockQty = Math.min(Number(issue.produce_qty), remain);
+      } else {
+        // 从工单「去入库」进入：按实际已领数量（累计可入库余量）锁定，未领部分不处理。
+        // 工单存在多张领料单、或已发生退料 / 不良核减时走这条分支，
+        // 只按单张领料单算会把可入库数量算少。
+        lockQty = remain;
+      }
       if (lockQty <= 0) throw Err.conflict('可入库余量为 0，请先继续领料');
 
       const total = d.items.reduce((s, i) => s + i.qty, 0);
       // 服务端强制锁定：数量必须与可入库余量一致，防止前端篡改或刷库存
       if (Math.abs(total - lockQty) > 1e-6 || d.items.length !== 1) {
         throw Err.conflict(
-          `已领料工单入库数量被锁定为 ${lockQty}（领料数量与可入库余量取小值），不可修改`,
+          `已领料工单入库数量被锁定为 ${lockQty}（按实际已领数量，未领部分不再处理），不可修改`,
           { lockQty },
         );
       }

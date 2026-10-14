@@ -110,7 +110,13 @@ workOrderRouter.get('/options', requirePerm('production.wo.view'), (req, res) =>
   ok(res, rows.map((r) => ({ ...r, availableQty: availableToReceive(r.id) })));
 });
 
-/** 去入库预填：仅未领料工单走「成品入库（直接扣料）」（需求 4.6） */
+/**
+ * 去入库预填（按领料情况分流）。
+ *
+ * - 已领部分物料 → 「生产入库（已领料）」：入库数 = 实际已领可入库余量（issued − received），
+ *   自动回填并锁定只读，未领部分不再处理。
+ * - 未领物料     → 「成品入库（直接扣料）」：按工单应发数量（计划量 − 已入库）直接扣减物料库存。
+ */
 workOrderRouter.get('/:id/for-receipt', requirePerm('production.receipt.create'), (req, res) => {
   const id = Number(req.params.id);
   const wo = db
@@ -120,12 +126,43 @@ workOrderRouter.get('/:id/for-receipt', requirePerm('production.receipt.create')
     )
     .get(id) as any;
   if (!wo) throw Err.notFound('生产工单不存在');
+
+  // ---------- 分支一：已领部分物料 ----------
   if (Number(wo.issued_qty) > 0) {
-    throw Err.conflict('该工单已领料，请从「生产领料」列表进入入库');
+    const avail = availableToReceive(id); // = 累计有效领料 − 已入库（已扣退料与不良）
+    if (avail <= 0) throw Err.conflict('该工单已领部分已全部入库，无可入库余量');
+
+    // 只有唯一一张有效领料单时才回填关联领料单，便于追溯；
+    // 多张领料单时留空，由服务端按「工单累计可入库余量」锁定，避免只按单张领料单算少。
+    const issues = db
+      .prepare(`SELECT id FROM material_issues WHERE wo_id = ? AND status = '有效' ORDER BY id`)
+      .all(id) as any[];
+    const issueId = issues.length === 1 ? Number(issues[0].id) : undefined;
+
+    ok(res, {
+      workOrder: wo,
+      productId: wo.product_id,
+      suggestQty: avail,
+      lockQty: avail,
+      locked: true,
+      issueId,
+      receiptType: '生产入库（已领料）',
+    });
+    return;
   }
+
+  // ---------- 分支二：未领物料，直接扣料 ----------
   const remain = Math.max(0, Number(wo.plan_qty) - Number(wo.received_qty));
   if (remain <= 0) throw Err.conflict('该工单已全部入库');
-  ok(res, { workOrder: wo, productId: wo.product_id, suggestQty: remain, receiptType: '成品入库（直接扣料）' });
+  ok(res, {
+    workOrder: wo,
+    productId: wo.product_id,
+    suggestQty: remain,
+    lockQty: remain,
+    locked: false, // 未领料场景数量可调整（如分批入库）
+    issueId: undefined,
+    receiptType: '成品入库（直接扣料）',
+  });
 });
 
 workOrderRouter.get('/:id', requirePerm('production.wo.view'), (req, res) => {

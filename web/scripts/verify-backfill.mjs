@@ -148,4 +148,145 @@ await act(async () => {
 });
 assert(calls.length === before, '新建：editing 为 null 时不触发回填（走默认值）');
 
+// ============================================================
+// 4) 生产工单页（async 拉详情 → pendingDetail → effect 回填）
+//    逻辑与 WorkOrderPage.tsx 的 openEdit / useEffect 完全一致
+// ============================================================
+const woDetail = {
+  product_id: 12,
+  plan_qty: 300,
+  bom_version: 'V2.0',
+  plan_start: '2026-10-01',
+  plan_end: '2026-10-20',
+  remark: '工单备注',
+};
+const woRow = { id: 55, wo_no: 'WO20260055' };
+
+function MirrorWorkOrder() {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [pendingDetail, setPendingDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  async function openEdit(row) {
+    setDetailLoading(true);
+    try {
+      const detail = await Promise.resolve(woDetail); // 模拟 productionApi.workOrderDetail
+      setEditing(row);
+      setPendingDetail({
+        productId: detail.product_id,
+        planQty: detail.plan_qty,
+        bomVersion: detail.bom_version,
+        planStart: detail.plan_start || undefined,
+        planEnd: detail.plan_end || undefined,
+        remark: detail.remark,
+      });
+      setOpen(true);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function closeModal() {
+    setOpen(false);
+    setEditing(null);
+    setPendingDetail(null);
+    form.resetFields();
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) form.setFieldsValue(pendingDetail);
+  }, [open, editing, pendingDetail]);
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement('button', { id: 'wo-edit', onClick: () => void openEdit(woRow) }, 'wo-edit'),
+    React.createElement('button', { id: 'wo-close', onClick: closeModal }, 'wo-close'),
+    React.createElement('span', { id: 'wo-loading' }, String(detailLoading)),
+  );
+}
+
+const c3 = document.createElement('div');
+document.body.appendChild(c3);
+const root3 = createRoot(c3);
+await act(async () => {
+  root3.render(React.createElement(MirrorWorkOrder));
+});
+const beforeWo = calls.length;
+await act(async () => {
+  document.getElementById('wo-edit').click();
+});
+const woCall = calls[calls.length - 1];
+console.log('工单编辑回填值:', JSON.stringify(woCall));
+assert(calls.length === beforeWo + 1, '工单：一次打开只回填一次（无重复 / 无遗漏）');
+assert(woCall && woCall.productId === 12, '工单：主产品回填');
+assert(woCall && woCall.planQty === 300, '工单：计划产量回填 300');
+assert(woCall && woCall.bomVersion === 'V2.0', '工单：BOM 版本回填');
+assert(woCall && woCall.planStart === '2026-10-01' && woCall.planEnd === '2026-10-20', '工单：计划起止回填');
+assert(woCall && woCall.remark === '工单备注', '工单：备注回填');
+
+// 关闭再打开另一条：不能残留上一条的数据
+await act(async () => {
+  document.getElementById('wo-close').click();
+});
+const beforeWo2 = calls.length;
+await act(async () => {
+  root3.render(React.createElement(MirrorWorkOrder));
+});
+await act(async () => {
+  document.getElementById('wo-edit').click();
+});
+const woCall2 = calls[calls.length - 1];
+assert(calls.length === beforeWo2 + 1, '工单：关闭后重新打开仍只回填一次');
+assert(woCall2 && woCall2.planQty === 300, '工单：重开后数据仍正确（无空表单）');
+
+// ============================================================
+// 5) 用户管理页（同步 openEdit → pendingUser → effect 回填）
+//    逻辑与 UserPage.tsx 完全一致
+// ============================================================
+const userRow = { id: 3, username: 'ping', display_name: '平哥', role: 'admin', status: 'active' };
+
+function MirrorUser() {
+  const [userOpen, setUserOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [pendingUser, setPendingUser] = useState(null);
+
+  function openEdit(row) {
+    setEditing(row);
+    setPendingUser({
+      username: row.username,
+      displayName: row.display_name,
+      role: row.role,
+      status: row.status,
+    });
+    setUserOpen(true);
+  }
+
+  useEffect(() => {
+    if (!userOpen) return;
+    if (pendingUser) form.setFieldsValue(pendingUser);
+  }, [userOpen, editing, pendingUser]);
+
+  return React.createElement('button', { id: 'user-edit', onClick: () => openEdit(userRow) }, 'user-edit');
+}
+
+const c4 = document.createElement('div');
+document.body.appendChild(c4);
+const root4 = createRoot(c4);
+await act(async () => {
+  root4.render(React.createElement(MirrorUser));
+});
+const beforeUser = calls.length;
+await act(async () => {
+  document.getElementById('user-edit').click();
+});
+const userCall = calls[calls.length - 1];
+console.log('账号编辑回填值:', JSON.stringify(userCall));
+assert(calls.length === beforeUser + 1, '账号：一次打开只回填一次');
+assert(userCall && userCall.username === 'ping', '账号：登录账号回填');
+assert(userCall && userCall.displayName === '平哥', '账号：姓名回填');
+assert(userCall && userCall.role === 'admin' && userCall.status === 'active', '账号：角色 / 状态回填');
+
 console.log(process.exitCode ? '\n=== 存在失败用例 ===' : '\n=== 全部通过 ===');

@@ -45,6 +45,14 @@ export default function WorkOrderPage() {
   const [editing, setEditing] = useState<any>(null);
   /** 列表当前选中的工单 id——顶部操作按钮作用于它 */
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  /**
+   * 弹窗待回填数据。
+   * 不直接写表单，先存这里，等弹窗挂载完成后由下方 useEffect 统一回填——
+   * 否则会被 destroyOnClose + preserve={false} 的挂载初始化覆盖清空（编辑弹窗全空的根因）。
+   */
+  const [pendingDetail, setPendingDetail] = useState<any>(null);
+  /** 详情加载中：期间禁用表单，避免对尚未回填的空表单误操作 */
+  const [detailLoading, setDetailLoading] = useState(false);
   const [form] = Form.useForm();
 
   // 选中行从当前列表实时取：翻页/刷新后旧的 selectedId 天然失效，
@@ -63,8 +71,8 @@ export default function WorkOrderPage() {
     const st: any = location.state;
     if (st?.prefill?.productId) {
       setEditing(null);
-      form.resetFields();
-      form.setFieldsValue({ productId: st.prefill.productId, planQty: 100 });
+      // 只暂存，实际写表单交给下方 useEffect（挂载前 setFieldsValue 会被清空）
+      setPendingDetail({ productId: st.prefill.productId, planQty: 100 });
       setOpen(true);
       navigate('/production/work-orders', { replace: true, state: null });
     }
@@ -73,23 +81,56 @@ export default function WorkOrderPage() {
 
   function openCreate() {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({ planQty: 100 });
+    setPendingDetail({ planQty: 100 });
     setOpen(true);
   }
 
+  /**
+   * 编辑：先拉详情暂存到 pendingDetail，再由下方 useEffect 于弹窗挂载后回填。
+   * 不能在 await 之后直接 setFieldsValue——此刻弹窗尚未挂载，值会被随后的
+   * 挂载初始化覆盖清空（与物料 / 供应商 / 客户 / 成品档案同一根因）。
+   */
   async function openEdit(row: any) {
-    const detail = await productionApi.workOrderDetail(row.id);
-    setEditing(row);
-    form.setFieldsValue({
-      productId: detail.product_id,
-      planQty: detail.plan_qty,
-      bomVersion: detail.bom_version,
-      planStart: detail.plan_start || undefined,
-      planEnd: detail.plan_end || undefined,
-      remark: detail.remark,
-    });
-    setOpen(true);
+    setDetailLoading(true);
+    try {
+      const detail = await productionApi.workOrderDetail(row.id);
+      setEditing(row);
+      setPendingDetail({
+        productId: detail.product_id,
+        planQty: detail.plan_qty,
+        bomVersion: detail.bom_version,
+        planStart: detail.plan_start || undefined,
+        planEnd: detail.plan_end || undefined,
+        remark: detail.remark,
+      });
+      setOpen(true);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  /**
+   * 弹窗挂载完成后统一回填。
+   *
+   * ⚠️ 依赖必须带全 open / editing / pendingDetail：只写 [open] 会让 effect 闭包
+   * 绑到旧渲染帧的 pendingDetail，某些时序下读到 null 直接 return，
+   * 结果就是「打开编辑后表单全空」（物料/供应商/客户页最初就是栽在这里）。
+   */
+  useEffect(() => {
+    if (!open) return;
+    if (pendingDetail) form.setFieldsValue(pendingDetail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, pendingDetail]);
+
+  /** 关闭弹窗并清理上下文，避免下次打开残留上一次的数据 */
+  function closeModal() {
+    setOpen(false);
+    setEditing(null);
+    setPendingDetail(null);
+    setDetailLoading(false);
+    form.resetFields();
   }
 
   /** 顶部操作按钮的类型 */
@@ -102,6 +143,8 @@ export default function WorkOrderPage() {
    * - 已完工（status = '已完工'） → 阻止一切写操作
    * - 入库已满（remainQty <= 0）  → 阻止「去入库」「去领料」（料已够、无需再领/再入）
    * - 已领料（issued_qty > 0）    → 阻止「编辑」「删除」（后端 canEdit 亦要求 issued_qty = 0）
+   * - 已领部分已全部入库          → 阻止「去入库」：去入库按「实际已领数量」入库且未领部分不再处理，
+   *                                 已领部分若已入满则本单无可再入数量（需先继续领料）
    * 打印是只读操作，不设状态门槛。
    */
   function blockReason(row: any, action: WoAction): string | null {
@@ -111,6 +154,11 @@ export default function WorkOrderPage() {
     if ((action === 'receive' || action === 'issue') && remain <= 0) return '已入库完成';
     if ((action === 'edit' || action === 'delete') && Number(row.issued_qty ?? 0) > 0)
       return '已领料完成';
+    if (action === 'receive') {
+      const issued = Number(row.issued_qty ?? 0);
+      const received = Number(row.received_qty ?? 0);
+      if (issued > 0 && issued - received <= 0) return '已领部分已全部入库';
+    }
     return null;
   }
 
@@ -146,7 +194,7 @@ export default function WorkOrderPage() {
         await productionApi.createWorkOrder(payload);
         message.success('生产工单已创建');
       }
-      setOpen(false);
+      closeModal();
       setSelectedId(null); // 操作完成后清除选中，避免下次误点到同一行
       reload();
     } catch (e: any) {
@@ -218,11 +266,17 @@ export default function WorkOrderPage() {
                 reload();
               }}
             >
-              <PrintButton docType="work_order" id={selected?.id ?? 0} type="default" />
+              <PrintButton
+                docType="work_order"
+                id={selected?.id ?? 0}
+                type="default"
+                size="middle"
+                className="btn-action"
+              />
             </span>
 
             <Button
-              size="small"
+              className="btn-action btn-key"
               icon={<ImportOutlined />}
               onClick={() =>
                 runAction('receive', (row) =>
@@ -234,7 +288,7 @@ export default function WorkOrderPage() {
             </Button>
 
             <Button
-              size="small"
+              className="btn-action btn-key"
               icon={<ExportOutlined />}
               onClick={() =>
                 runAction('issue', (row) =>
@@ -246,7 +300,7 @@ export default function WorkOrderPage() {
             </Button>
 
             <Button
-              size="small"
+              className="btn-action btn-key"
               icon={<EditOutlined />}
               onClick={() => runAction('edit', (row) => void openEdit(row))}
             >
@@ -254,7 +308,7 @@ export default function WorkOrderPage() {
             </Button>
 
             <Button
-              size="small"
+              className="btn-action btn-danger-action"
               danger
               icon={<DeleteOutlined />}
               onClick={() =>
@@ -358,8 +412,18 @@ export default function WorkOrderPage() {
         ]}
       />
 
-      <Modal open={open} title={editing ? '编辑生产工单' : '新增生产工单'} onCancel={() => setOpen(false)} onOk={submit} destroyOnClose>
-        <Form form={form} layout="vertical" preserve={false}>
+      <Modal
+        open={open}
+        title={editing ? '编辑生产工单' : '新增生产工单'}
+        onCancel={closeModal}
+        onOk={submit}
+        // 不使用 destroyOnClose：它与 Form 的 preserve={false} 叠加会让
+        // 「挂载前写入的回填值」被初始化覆盖清空（编辑弹窗全空的根因）
+        destroyOnClose={false}
+        forceRender
+        confirmLoading={detailLoading}
+      >
+        <Form form={form} layout="vertical" preserve={false} disabled={detailLoading}>
           <Form.Item name="productId" label="主产品" rules={[{ required: true, message: '请选择主产品' }]}>
             <Select
               showSearch

@@ -89,8 +89,9 @@ export default function ProductReceiptPage() {
         .then((d) => {
           setReceiptType(d.receiptType as ReceiptType);
           setWoId(st.workOrderId);
-          setIssueId(undefined);
-          setLocked(false);
+          // 已领料的工单由后端返回关联领料单（唯一有效领料单时）并锁定数量
+          setIssueId(d.issueId ?? undefined);
+          setLocked(!!d.locked);
           setItems([{ key: 'wo', productId: d.productId, qty: d.suggestQty }]);
           setReceiptDate(today());
           setRemark('');
@@ -302,7 +303,8 @@ export default function ProductReceiptPage() {
           {isIssued && (
             <Select
               style={{ width: 300 }}
-              placeholder="选择领料单（必填）"
+              placeholder={locked ? '按工单实际已领数量入库（未领部分不处理）' : '选择领料单（必填）'}
+              disabled={locked}
               value={issueId}
               onChange={(v) => {
                 setIssueId(v);
@@ -340,7 +342,7 @@ export default function ProductReceiptPage() {
             type="warning"
             showIcon
             style={{ marginBottom: 12 }}
-            message="已领料工单：入库类型与数量由系统锁定（领料数量与可入库余量取小值），不可修改，防止超产与重复刷库存"
+            message="已领料工单：入库类型与数量由系统按「实际已领数量」锁定，未领部分不再处理，不可修改，防止超产与重复刷库存"
           />
         )}
 

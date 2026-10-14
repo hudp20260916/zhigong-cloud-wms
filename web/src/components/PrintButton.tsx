@@ -13,6 +13,7 @@ export function PrintButton({
   size = 'small',
   type = 'link',
   label = '打印',
+  className,
 }: {
   docType: string;
   id: number;
@@ -20,11 +21,14 @@ export function PrintButton({
   /** 默认 link（行内轻量样式）；移到顶部按钮组时可传 'default' 与其它按钮视觉一致 */
   type?: 'link' | 'text' | 'default' | 'primary' | 'dashed';
   label?: string;
+  /** 额外类名：用于套用统一按钮尺寸 / 高亮样式（如 btn-key） */
+  className?: string;
 }) {
   return (
     <Button
       type={type}
       size={size}
+      className={className}
       icon={<PrinterOutlined />}
       onClick={() => {
         const w = window.open(printApi.renderUrl(docType, id), '_blank');

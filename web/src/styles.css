@@ -60,3 +60,58 @@ body,
 .mobile-card--selected {
   border-color: var(--hl);
 }
+
+/* ============================================================
+   关键操作按钮高亮（去入库 / 去领料 / 编辑 / 保存 / 提交 等）
+   目标：配色更醒目 + 适度加大字号与点击区域，同时不破坏现有栅格布局。
+   配色走 --hl / --hl-soft 主题变量，明暗主题自动适配。
+   ============================================================ */
+
+/* 1) 主按钮：Modal 的「确定 / 保存 / 提交」、页面主操作都走 antd primary，
+      这里统一加大点击区域并加一层主题色投影，让它在页面上更抓眼 */
+/* 排除 .dock-action：≤768px 时它由 responsive.css 变成右下角悬浮圆按钮（高度取 --dock-size），
+   这里的固定高度会把它压扁，所以必须让开 */
+.ant-btn-primary:not(.ant-btn-lg):not(.ant-btn-circle):not(.ant-btn-icon-only):not(.dock-action) {
+  height: 34px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px var(--hl-soft);
+}
+.ant-btn-primary.ant-btn-sm:not(.dock-action) {
+  height: 30px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+/* 2) 列表顶部操作按钮组：统一尺寸（原为 24px 的 small，太小不好点） */
+.btn-action.ant-btn {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+/* 3) 关键操作（去入库 / 去领料 / 编辑）：主题色描边 + 浅底高亮 */
+.btn-key.ant-btn,
+.ant-btn.btn-key:not(:disabled):hover,
+.ant-btn.btn-key:not(:disabled):focus {
+  color: var(--hl);
+  border-color: var(--hl);
+  background: var(--hl-soft);
+}
+.ant-btn.btn-key:not(:disabled):hover,
+.ant-btn.btn-key:not(:disabled):focus {
+  box-shadow: 0 0 0 3px var(--hl-soft);
+}
+
+/* 4) 危险操作（删除 / 撤销）：沿用 antd danger 配色，只统一尺寸 */
+.btn-danger-action.ant-btn {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+}

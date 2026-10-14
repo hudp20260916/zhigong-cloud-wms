@@ -33,6 +33,12 @@ export default function UserPage() {
   const [roles, setRoles] = useState<any[]>([]);
   const [userOpen, setUserOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  /**
+   * 弹窗待回填数据。
+   * 不直接写表单，先存这里，等弹窗挂载完成后由下方 useEffect 统一回填——
+   * 否则会被 destroyOnClose + preserve={false} 的挂载初始化覆盖清空（编辑弹窗全空的根因）。
+   */
+  const [pendingUser, setPendingUser] = useState<any>(null);
   const [userForm] = Form.useForm();
 
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -49,20 +55,49 @@ export default function UserPage() {
 
   function openCreate() {
     setEditing(null);
-    userForm.resetFields();
-    userForm.setFieldsValue({ role: 'viewer', status: 'active' });
+    // 只暂存，实际写表单交给下方 useEffect（挂载前 setFieldsValue 会被清空）
+    setPendingUser({ role: 'viewer', status: 'active' });
     setUserOpen(true);
   }
 
   function openEdit(row: any) {
     setEditing(row);
-    userForm.setFieldsValue({
+    setPendingUser({
       username: row.username,
       displayName: row.display_name,
       role: row.role,
       status: row.status,
     });
     setUserOpen(true);
+  }
+
+  /**
+   * 弹窗挂载完成后统一回填。
+   *
+   * ⚠️ 依赖必须带全 userOpen / editing / pendingUser：只写 [userOpen] 会让 effect
+   * 闭包绑到旧渲染帧的 pendingUser，某些时序下读到 null 直接 return，
+   * 结果就是「点击编辑后表单全空」（与物料 / 供应商 / 客户 / 成品档案同一根因）。
+   */
+  useEffect(() => {
+    if (!userOpen) return;
+    if (pendingUser) userForm.setFieldsValue(pendingUser);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userOpen, editing, pendingUser]);
+
+  /** 关闭账号弹窗并清理上下文，避免下次打开残留上一次的数据 */
+  function closeUserModal() {
+    setUserOpen(false);
+    setEditing(null);
+    setPendingUser(null);
+    userForm.resetFields();
+  }
+
+  /** 关闭密码弹窗并清理，避免残留上一次输入的密码 */
+  function closePwdModal() {
+    setPwdOpen(false);
+    setPwdTarget(null);
+    pwdForm.resetFields();
+    setNewPwd('');
   }
 
   async function submitUser() {
@@ -75,7 +110,7 @@ export default function UserPage() {
         await systemApi.createUser(v);
         message.success('账号已创建');
       }
-      setUserOpen(false);
+      closeUserModal();
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -89,9 +124,7 @@ export default function UserPage() {
       message.success(
         res?.kicked ? '密码已修改，该账号在线会话已被强制注销' : '密码已修改',
       );
-      setPwdOpen(false);
-      pwdForm.resetFields();
-      setNewPwd('');
+      closePwdModal();
       reload();
     } catch (e: any) {
       message.error(e.message);
@@ -177,7 +210,8 @@ export default function UserPage() {
         />
       </Card>
 
-      <Modal open={userOpen} title={editing ? '编辑账号' : '新增账号'} onCancel={() => setUserOpen(false)} onOk={submitUser} destroyOnClose>
+      {/* 不使用 destroyOnClose：它与 Form 的 preserve={false} 叠加会让「挂载前写入的回填值」被初始化覆盖清空 */}
+      <Modal open={userOpen} title={editing ? '编辑账号' : '新增账号'} onCancel={closeUserModal} onOk={submitUser} destroyOnClose={false} forceRender>
         <Form form={userForm} layout="vertical" preserve={false}>
           <Form.Item name="username" label="登录账号" rules={[{ required: true, message: '请输入账号' }]}>
             <Input disabled={!!editing} />
@@ -207,9 +241,10 @@ export default function UserPage() {
       <Modal
         open={pwdOpen}
         title={`修改密码 · ${pwdTarget?.display_name ?? ''}（${pwdTarget?.username ?? ''}）`}
-        onCancel={() => setPwdOpen(false)}
+        onCancel={closePwdModal}
         onOk={submitPassword}
-        destroyOnClose
+        destroyOnClose={false}
+        forceRender
       >
         <Form form={pwdForm} layout="vertical" preserve={false}>
           <Form.Item
