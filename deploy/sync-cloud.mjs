@@ -199,7 +199,13 @@ async function walked(fn) {
   try { await fn(); } finally { conn.end(); }
 }
 
-conn.on('ready', () => { main().catch((e) => { console.error('异常：', e.message); conn.end(); process.exit(1); }); });
+// 注意：check 分支不走 walked()，必须自己收尾关连接，否则进程不退出 ——
+// 配合 `| tail` 时表现为「一直没输出」（tail 要等 EOF 才吐字），极易误判为卡死。
+conn.on('ready', () => {
+  main()
+    .catch((e) => { console.error('异常：', e.message); process.exitCode = 1; })
+    .finally(() => { conn.end(); });
+});
 conn.on('error', (e) => { console.error('连接失败：', e.message); process.exit(1); });
 
 const auth = KEY
