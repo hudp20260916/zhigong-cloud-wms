@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Button, Drawer, Layout, Menu, Space, Tag, Tooltip, Typography, Switch } from 'antd';
+import { Alert, Avatar, Button, Drawer, Layout, Menu, Space, Tag, Tooltip, Typography, Switch } from 'antd';
 import {
   AccountBookOutlined,
   AppstoreOutlined,
@@ -18,6 +18,7 @@ import {
 } from '@ant-design/icons';
 import { ROLE_LABEL, type Role } from '@shared/permissions';
 import { useBrandName } from '../brand';
+import { systemApi } from '../api';
 import { useAuthStore } from '../stores/auth';
 import { useThemeStore } from '../stores/theme';
 import { useIsMobile } from '../hooks/useIsMobile';
@@ -124,6 +125,47 @@ export default function MainLayout() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const brandName = useBrandName();
+
+  // ---- 授权横幅：只在「需要用户知道」的状态显示，active/trial 前期静默 ----
+  const [license, setLicense] = useState<any>(null);
+  useEffect(() => {
+    systemApi
+      .license()
+      .then(setLicense)
+      .catch(() => setLicense(null));
+  }, [location.pathname]);
+
+  const licenseBanner = useMemo(() => {
+    if (!license) return null;
+    const s = license.status;
+    if (s === 'active' || !license.message) return null;
+    // 试用前期不打扰；剩 7 天内才开始提醒
+    if (s === 'trial' && (license.daysLeft ?? 99) > 7) return null;
+    const map: Record<string, { type: 'info' | 'warning' | 'error'; showIcon: boolean }> = {
+      trial: { type: 'info', showIcon: true },
+      grace: { type: 'warning', showIcon: true },
+      expired: { type: 'error', showIcon: true },
+      machine_mismatch: { type: 'error', showIcon: true },
+      invalid: { type: 'error', showIcon: true },
+    };
+    const cfg = map[s];
+    if (!cfg) return null;
+    return (
+      <Alert
+        type={cfg.type}
+        showIcon
+        style={{ marginBottom: 12 }}
+        message={license.message}
+        description={
+          s === 'expired'
+            ? '系统已进入只读模式：查询与导出不受影响；请在「系统管理 → 系统参数 → 授权信息」中激活新授权码。'
+            : s === 'machine_mismatch' || s === 'invalid'
+              ? '请在「系统管理 → 系统参数 → 授权信息」中重新激活。'
+              : undefined
+        }
+      />
+    );
+  }, [license]);
   const logout = useAuthStore((s) => s.logout);
   const has = useAuthStore((s) => s.has);
 
@@ -251,6 +293,11 @@ export default function MainLayout() {
           )}
         </Header>
         <Content style={{ padding: 16, overflow: 'auto', background: '#f5f6f8' }}>
+          {/*
+            授权横幅：试用将满 / 宽限期 / 过期只读 / 机器不匹配时全站可见。
+            拉取失败静默不显示 —— 授权提示永远不能挡住正常干活。
+          */}
+          {licenseBanner}
           {/*
             页面级兜底：任何页面在渲染期抛错，React 18 会卸载整棵树 → 整页白屏、
             连报错原因都看不到（本系统踩过 DatePicker 收字符串、弹窗回填时序两次）。

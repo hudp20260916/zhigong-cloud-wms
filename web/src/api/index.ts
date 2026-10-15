@@ -248,4 +248,8 @@ export const systemApi = {
     api.post<any>('/system/account/backups', { password, note }),
   restoreBackup: (id: number, password: string, confirmText: string) =>
     api.post<any>(`/system/account/backups/${id}/restore`, { password, confirmText }),
+
+  // ---- 授权（状态公开给登录页/横幅；激活仅 admin）----
+  license: () => api.get<any>('/auth/license'),
+  activateLicense: (licenseKey: string) => api.post<any>('/auth/license/activate', { licenseKey }),
 };

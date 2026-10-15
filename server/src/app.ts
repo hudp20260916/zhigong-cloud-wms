@@ -15,6 +15,7 @@ import { reportRouter } from './modules/reports/index.js';
 import { dashboardRouter } from './modules/dashboard/routes.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { requireAuth } from './middleware/auth.js';
+import { licenseWriteGate } from './middleware/license.js';
 import { config } from './config.js';
 
 export function createApp() {
@@ -30,6 +31,8 @@ export function createApp() {
   // 登录接口无需鉴权，其余 /api 接口统一先过鉴权，业务路由只关心权限点
   app.use('/api/auth', authRouter);
   app.use('/api', requireAuth);
+  // 授权写入门禁：授权彻底过期后进入只读模式（查询/导出不受影响，激活接口可自救）
+  app.use('/api', licenseWriteGate);
 
   app.use('/api/dashboard', dashboardRouter);
   app.use('/api/archive', archiveRouter);

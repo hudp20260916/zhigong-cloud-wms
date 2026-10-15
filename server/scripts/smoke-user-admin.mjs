@@ -10,7 +10,8 @@
  *   BASE=http://127.0.0.1:3098/api node server/scripts/smoke-user-admin.mjs   # 非默认端口
  */
 const BASE = process.env.BASE ?? 'http://127.0.0.1:3098/api';
-const ADMIN = { username: 'admin', password: 'admin12345' };
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin12345'; // 与 seed.ts 的 DEFAULT_PASSWORD 保持一致
+const ADMIN = { username: 'admin', password: ADMIN_PASSWORD };
 
 let pass = 0;
 let fail = 0;

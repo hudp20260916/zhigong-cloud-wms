@@ -9,6 +9,7 @@ import { requireAuth, requirePerm } from '../../middleware/auth.js';
 import { countRows, parsePage } from '../../shared/query.js';
 import { ok, okList } from '../../shared/http.js';
 import { nextUserNo, isBuiltinUsername } from '../../core/account.js';
+import { seatsAvailable } from '../../core/license.js';
 import { printRouter } from './print.js';
 import { importRouter } from './import.js';
 import { initRouter } from './init.js';
@@ -68,6 +69,10 @@ systemRouter.post('/users', requirePerm('system.user.manage'), (req, res) => {
     if (db.prepare(`SELECT id FROM users WHERE username = ?`).get(d.username)) {
       throw Err.conflict(`账号【${d.username}】已存在`);
     }
+    // 授权的账号数上限（seats）只在新增时拦截，绝不踢已有账号
+    const seat = seatsAvailable();
+    if (!seat.ok) throw Err.forbidden(seat.message!);
+
     // 内置账号受保护：既不可删除，也不允许被「另建一个同名账号」绕过配额与初始化清理
     if (isBuiltinUsername(d.username)) {
       throw Err.conflict(`【${d.username}】为系统内置账号，不允许重复创建`);

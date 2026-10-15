@@ -2,9 +2,15 @@ import { createApp } from './app.js';
 import { config } from './config.js';
 import { db, migrate } from './db/index.js';
 import { seedIfEmpty } from './db/seed.js';
+import { ensureLicenseRow, licenseState } from './core/license.js';
 
 migrate();
 seedIfEmpty();
+ensureLicenseRow();
+
+// 启动时把授权状态打出来，部署现场一眼可见；不阻断启动（降级策略在中间件里）
+const st = licenseState();
+console.log(`[license] ${st.status} · ${st.message}`);
 
 const app = createApp();
 

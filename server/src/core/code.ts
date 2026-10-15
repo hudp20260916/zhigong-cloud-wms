@@ -133,10 +133,18 @@ function bumpSeq(kind: CodeKind, prefix: string, seq: number): void {
 }
 
 export function nextCode(kind: CodeKind, date = todayStr()): string {
-  const prefix = codePrefix(kind);
-  const seq = currentSeq(kind) + 1;
-  bumpSeq(kind, prefix, seq);
-  return `${prefix}${date.replace(/-/g, '')}-${String(seq).padStart(seqWidth(), '0')}`;
+  const generate = (): string => {
+    const prefix = codePrefix(kind);
+    const seq = currentSeq(kind) + 1;
+    bumpSeq(kind, prefix, seq);
+    return `${prefix}${date.replace(/-/g, '')}-${String(seq).padStart(seqWidth(), '0')}`;
+  };
+
+  // 并发防重号：读 current 与写 current 必须是同一把写锁内的动作。
+  // 已在事务内（单据创建本来就是 tx）则直接算——嵌套事务会降级为 savepoint，无需重复加锁；
+  // 独立调用时（导入、预检等）用 IMMEDIATE 开局就抢写锁，两个并发请求不可能读到同一个 current。
+  if (db.inTransaction) return generate();
+  return db.transaction(generate).immediate();
 }
 
 /** 预览某个类型下一张单号长什么样（系统参数页展示用，不消耗序号） */

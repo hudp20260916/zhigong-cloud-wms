@@ -13,10 +13,10 @@ import {
   Typography,
   message,
 } from 'antd';
-import { CloudDownloadOutlined, DatabaseOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { CloudDownloadOutlined, DatabaseOutlined, FileExcelOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { api } from '../../api/client';
-import { backupApi } from '../../api';
+import { backupApi, systemApi } from '../../api';
 import { refreshBrandName } from '../../brand';
 import { PermPage, PermGate } from '../../components';
 
@@ -202,6 +202,11 @@ function SettingsInner() {
         </div>
       ))}
 
+      {/* 授权信息：所有 admin 可见可激活；普通角色不渲染这个区块 */}
+      <PermGate permission="system.license.manage">
+        <LicenseCard />
+      </PermGate>
+
       {/* 需求 30：备份所有模块数据 */}
       <Divider orientation="left" plain>
         数据备份
@@ -240,6 +245,118 @@ function SettingsInner() {
           />
         </Card>
       </PermGate>
+    </Card>
+  );
+}
+
+/**
+ * 授权信息卡片。
+ *
+ * 设计要点：
+ *  - 状态与激活同屏：管理员看完「还剩几天」直接就能贴激活码，不用去别的页面；
+ *  - 机器指纹三分量展示出来，签发激活码时供应商要的就是这三串（可一键复制）；
+ *  - 激活失败的信息直接展示 —— 客户最烦的是「激活失败但不说为什么」。
+ */
+function LicenseCard() {
+  const [st, setSt] = useState<any>(null);
+  const [key, setKey] = useState('');
+  const [activating, setActivating] = useState(false);
+
+  const load = () =>
+    systemApi
+      .license()
+      .then(setSt)
+      .catch((e: any) => message.error(e.message));
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function activate() {
+    if (!key.trim()) return;
+    setActivating(true);
+    try {
+      const s = await systemApi.activateLicense(key.trim());
+      message.success(s.status === 'active' ? '授权已激活' : `授权状态：${s.message}`);
+      setKey('');
+      setSt(s);
+    } catch (e: any) {
+      message.error(e.message);
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  const STATUS: Record<string, { color: string; text: string }> = {
+    active: { color: 'green', text: '已授权' },
+    trial: { color: 'blue', text: '试用期' },
+    grace: { color: 'orange', text: '宽限期' },
+    expired: { color: 'red', text: '已过期（只读）' },
+    machine_mismatch: { color: 'red', text: '机器不匹配' },
+    invalid: { color: 'red', text: '激活码无效' },
+  };
+
+  return (
+    <Card
+      size="small"
+      title={
+        <Space>
+          <SafetyCertificateOutlined />
+          授权信息
+          {st && <Tag color={STATUS[st.status]?.color ?? 'default'}>{STATUS[st.status]?.text ?? st.status}</Tag>}
+        </Space>
+      }
+      style={{ marginTop: 16 }}
+    >
+      {st && (
+        <>
+          <Space size={[16, 8]} wrap style={{ marginBottom: 12 }}>
+            {st.licensee && (
+              <Typography.Text>
+                授权给：<strong>{st.licensee}</strong>
+              </Typography.Text>
+            )}
+            {st.plan && (
+              <Typography.Text>
+                版本：
+                <Tag color="blue">{st.plan}</Tag>
+              </Typography.Text>
+            )}
+            {st.seats != null && <Typography.Text>账号数上限：{st.seats}</Typography.Text>}
+            {st.expireAt && <Typography.Text>到期日：{st.expireAt}</Typography.Text>}
+            {st.daysLeft != null && st.daysLeft >= 0 && (
+              <Typography.Text type={st.daysLeft <= 7 ? 'warning' : undefined}>
+                剩余 {st.daysLeft} 天
+              </Typography.Text>
+            )}
+          </Space>
+          <div style={{ color: '#888', fontSize: 12, marginBottom: 12 }}>{st.message}</div>
+
+          <Divider orientation="left" plain style={{ margin: '8px 0' }}>
+            本机机器指纹（签发激活码时提供给供应商）
+          </Divider>
+          <Space direction="vertical" size={4} style={{ width: '100%', marginBottom: 12 }}>
+            {(st.fingerprint ?? []).map((h: string, i: number) => (
+              <Typography.Text key={i} className="mono" copyable style={{ fontSize: 12 }}>
+                组件 {i + 1}：{h}
+              </Typography.Text>
+            ))}
+          </Space>
+
+          <Input.TextArea
+            rows={3}
+            value={key}
+            placeholder="粘贴激活码（形如 xxx.yyy 的一长串）"
+            onChange={(e) => setKey(e.target.value)}
+          />
+          <div style={{ marginTop: 8, textAlign: 'right' }}>
+            <Button type="primary" loading={activating} disabled={!key.trim()} onClick={activate}>
+              激活
+            </Button>
+          </div>
+        </>
+      )}
     </Card>
   );
 }

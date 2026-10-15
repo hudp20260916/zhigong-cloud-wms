@@ -80,6 +80,7 @@ export type Permission =
   | 'system.user.manage'
   | 'system.user.init'
   | 'system.backup.manage'
+  | 'system.license.manage'
   | 'system.init.execute'
   | 'system.print.manage'
   | 'system.import.execute'
@@ -143,6 +144,7 @@ const ALL: Permission[] = [
   'system.user.manage',
   'system.user.init',
   'system.backup.manage',
+  'system.license.manage',
   'system.init.execute',
   'system.print.manage',
   'system.import.execute',

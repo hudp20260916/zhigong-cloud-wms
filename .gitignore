@@ -17,3 +17,6 @@ server/data/backup*/
 # WorkBuddy 本地会话数据（记忆/剪贴板截图），不上仓库
 .workbuddy/
 *.stale
+
+# 授权私钥（签发激活码用），绝不入仓库
+deploy/keys/
